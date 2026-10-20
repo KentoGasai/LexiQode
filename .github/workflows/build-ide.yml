@@ -29,12 +29,14 @@ on:
       - 'scripts/build-ide.ps1'
       - '.github/workflows/build-ide.yml'
 
-env:
-  # Paths are derived from the runner, never hardcoded: a runner has no
-  # C:\lexiqode, and a build that only works on one machine is not a build.
-  VSCODE_SOURCE: ${{ runner.temp }}\vscode
-  IDE_BUILD: ${{ runner.temp }}\VSCode-win32-x64
-
+# Paths are derived from the runner, never hardcoded: a runner has no
+# C:\lexiqode, and a build that only works on one machine is not a build.
+#
+# They live on the steps that need them rather than in an `env` block here, and
+# that is not a style choice. A workflow- or job-level `env` gets only `github`,
+# `vars` and `inputs`; `runner` is not among them, so `runner.temp` there makes
+# GitHub reject the entire file with "Unrecognized named-value: 'runner'" and no
+# build runs at all. scripts/tests/test_workflow.py fails if that reappears.
 jobs:
   build:
     # Visual Studio 2022 with the C++ workload and the Windows 11 SDK.
@@ -64,6 +66,8 @@ jobs:
 
       - name: Check out the VS Code sources
         shell: pwsh
+        env:
+          VSCODE_SOURCE: ${{ runner.temp }}\vscode
         run: |
           $ref = "${{ github.event.inputs.vscode_ref }}"
           if (-not $ref) { $ref = '1.142.0' }
@@ -99,10 +103,14 @@ jobs:
 
       - name: Build the IDE
         shell: pwsh
+        env:
+          VSCODE_SOURCE: ${{ runner.temp }}\vscode
         run: ./scripts/build-ide.ps1 -Source $env:VSCODE_SOURCE
 
       - name: Report what was built
         shell: pwsh
+        env:
+          IDE_BUILD: ${{ runner.temp }}\VSCode-win32-x64
         run: |
           $built = $env:IDE_BUILD
           if (-not (Test-Path $built)) { throw "no build at $built" }
@@ -119,6 +127,8 @@ jobs:
       # rather than trusting the steps that produced them.
       - name: Verify the packaged build against the branding rules
         shell: pwsh
+        env:
+          IDE_BUILD: ${{ runner.temp }}\VSCode-win32-x64
         run: |
           if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
             Write-Warning 'python is unavailable on this runner; the branding rule set was not checked'
@@ -131,7 +141,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: LexiQode-win32-x64
-          path: ${{ env.IDE_BUILD }}
+          # An expression in a step may use the runner context; an env block above
+          # a step may not, which is why this is spelled out here.
+          path: ${{ runner.temp }}\VSCode-win32-x64
           # Long builds produce many files; the compression is worth the time.
           compression-level: 6
           # A packaged build is a few hundred megabytes and artifact storage on a
