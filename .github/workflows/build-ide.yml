@@ -37,7 +37,7 @@ jobs:
 
     steps:
       - name: Check out this repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Report the toolchain the runner provides
         shell: pwsh
@@ -52,7 +52,7 @@ jobs:
           Write-Host "Visual Studio: $path"
 
       - name: Set up Node from the source requirements
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version-file: 'ide/vscode-node-version.txt'
 
@@ -104,10 +104,13 @@ jobs:
           Write-Host "size:      $size MB"
 
       - name: Upload the IDE
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: LexiQode-win32-x64
           path: C:\lexiqode\VSCode-win32-x64
           # Long builds produce many files; the compression is worth the time.
           compression-level: 6
-          retention-days: 14
+          # A packaged build is a few hundred megabytes and artifact storage on a
+          # private repository is limited, so it is not kept for long: download it
+          # after the run rather than relying on it sitting there.
+          retention-days: 7
