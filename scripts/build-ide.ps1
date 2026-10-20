@@ -154,19 +154,67 @@ $built = Join-Path (Split-Path $Source -Parent) 'VSCode-win32-x64'
 if (-not (Test-Path $built)) { throw "packaging reported success but there is no build at $built" }
 
 Write-Step 'installing the agent into the build'
+# The agent ships inside the product: a built-in extension in the application's
+# own extensions folder, plus the Python core next to it. Neither is installable
+# or removable through the UI, which is the point.
+$extension = Join-Path $repo 'extension'
+if (-not (Test-Path (Join-Path $extension 'out\extension.js'))) {
+    throw "the extension is not compiled; run: npm --prefix extension run compile"
+}
+
 $target = Join-Path $built 'resources\app\extensions\lexiqode'
 if (Test-Path $target) { Remove-Item $target -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $target | Out-Null
-$extension = Join-Path $repo 'extension'
-foreach ($item in 'package.json', 'out', 'media') {
-    Copy-Item (Join-Path $extension $item) $target -Recurse
+foreach ($item in 'package.json', 'README.md', 'out', 'media') {
+    $itemPath = Join-Path $extension $item
+    if (Test-Path $itemPath) { Copy-Item $itemPath $target -Recurse }
 }
+# Source maps are development artefacts; a shipped build should not carry them.
+Get-ChildItem $target -Recurse -Filter '*.js.map' -ErrorAction SilentlyContinue | Remove-Item -Force
+
 $core = Join-Path $built 'resources\lexiqode-core'
 if (Test-Path $core) { Remove-Item $core -Recurse -Force }
-Copy-Item (Join-Path $repo 'core') $core -Recurse
+New-Item -ItemType Directory -Force -Path $core | Out-Null
+# Copied entry by entry rather than wholesale: tests, caches and stray scratch
+# files are not part of the product.
+foreach ($item in 'lexiqode', 'pyproject.toml', 'README.md', 'requirements.txt') {
+    $itemPath = Join-Path $repo (Join-Path 'core' $item)
+    if (-not (Test-Path $itemPath)) { continue }
+    if (Test-Path $itemPath -PathType Container) {
+        $destination = Join-Path $core $item
+        New-Item -ItemType Directory -Force -Path $destination | Out-Null
+        Copy-Item (Join-Path $itemPath '*') $destination -Recurse -Exclude '__pycache__'
+    } else {
+        Copy-Item $itemPath $core
+    }
+}
+Get-ChildItem $core -Recurse -Directory -Filter '__pycache__' -ErrorAction SilentlyContinue |
+    Remove-Item -Recurse -Force
+Get-ChildItem $core -Recurse -Filter '*.pyc' -ErrorAction SilentlyContinue | Remove-Item -Force
+
+if ($Out -and $Out -ne (Split-Path $built -Parent)) {
+    Write-Step "moving the build to $Out"
+    if (Test-Path (Join-Path $Out (Split-Path $built -Leaf))) {
+        Remove-Item (Join-Path $Out (Split-Path $built -Leaf)) -Recurse -Force
+    }
+    New-Item -ItemType Directory -Force -Path $Out | Out-Null
+    Move-Item $built (Join-Path $Out (Split-Path $built -Leaf))
+    $built = Join-Path $Out (Split-Path $built -Leaf)
+}
+
+# Read the identity back out of the build instead of trusting the earlier steps:
+# this is the file the application itself will read at startup.
+$shipped = Get-Content (Join-Path $built 'resources\app\product.json') -Raw | ConvertFrom-Json
+$launcher = Get-ChildItem $built -Filter '*.exe' -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -ne 'unins000.exe' } | Select-Object -First 1
 
 Write-Host ''
 Write-Host 'the IDE is built' -ForegroundColor Green
-Write-Host "  folder: $built"
-Write-Host "  launcher: $(Join-Path $built 'LexiQode.exe')"
-Write-Host "  agent: built-in extension + bundled core"
+Write-Host "  folder:    $built"
+Write-Host "  launcher:  $(if ($launcher) { $launcher.Name } else { '(no executable found)' })"
+Write-Host "  identity:  $($shipped.nameLong) ($($shipped.applicationName))"
+Write-Host "  profile:   $($shipped.dataFolderName)"
+Write-Host "  gallery:   $($shipped.extensionsGallery.serviceUrl)"
+Write-Host "  telemetry: $($shipped.enableTelemetry)"
+Write-Host "  agent:     built-in extension + bundled core"
+Write-Host "  size:      $([int]((Get-ChildItem $built -Recurse -File | Measure-Object Length -Sum).Sum / 1MB)) MB"

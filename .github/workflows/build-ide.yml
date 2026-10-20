@@ -1,0 +1,113 @@
+name: Build the IDE
+
+# The IDE is a patched build of the VS Code sources, and that build needs the
+# Microsoft C++ toolchain. A workstation without administrator rights cannot
+# install it, so the build happens here instead: the runner image ships Visual
+# Studio Enterprise 2022 with the NativeDesktop workload, VC.Tools.x86.x64 and
+# the Windows 11 SDK, which is exactly what the sources require.
+#
+# The result is a portable folder. Running it needs no privileges and no
+# installation, so the artifact is usable on the restricted machine as is.
+
+on:
+  workflow_dispatch:
+    inputs:
+      vscode_ref:
+        description: 'VS Code source ref to build (tag or branch)'
+        required: true
+        default: '1.144.0'
+  push:
+    branches: [main]
+    paths:
+      - 'ide/**'
+      - 'extension/**'
+      - 'core/**'
+      - 'scripts/build-ide.ps1'
+      - '.github/workflows/build-ide.yml'
+
+env:
+  # Keep this in step with the local clone so a local and a CI build agree.
+  VSCODE_SOURCE: C:\lexiqode\vscode
+
+jobs:
+  build:
+    # Visual Studio 2022 with the C++ workload and the Windows 11 SDK.
+    runs-on: windows-2022
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out this repository
+        uses: actions/checkout@v6
+
+      - name: Report the toolchain the runner provides
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $path = & $vswhere -latest -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath
+          if (-not $path) {
+            throw "the runner has no Visual Studio with the C++ workload; the build cannot proceed"
+          }
+          Write-Host "Visual Studio: $path"
+
+      - name: Set up Node from the source requirements
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: 'ide/vscode-node-version.txt'
+
+      - name: Check out the VS Code sources
+        shell: pwsh
+        run: |
+          $ref = "${{ github.event.inputs.vscode_ref }}"
+          if (-not $ref) { $ref = '1.144.0' }
+          Write-Host "cloning microsoft/vscode at $ref"
+          git clone --depth 1 --branch $ref https://github.com/microsoft/vscode.git $env:VSCODE_SOURCE
+          if (-not (Test-Path "$env:VSCODE_SOURCE\package.json")) {
+            throw "the clone produced no package.json at $env:VSCODE_SOURCE"
+          }
+          # The sources pin their own Node version; report a mismatch rather than
+          # discovering it as a native module failure later.
+          $wanted = (Get-Content "$env:VSCODE_SOURCE\.nvmrc" -Raw).Trim()
+          $have = (node -v).TrimStart('v')
+          Write-Host "source wants node $wanted, runner has $have"
+
+      - name: Compile the extension
+        working-directory: extension
+        run: |
+          npm install --no-audit --no-fund
+          npm run compile
+
+      - name: Build the IDE
+        shell: pwsh
+        run: ./scripts/build-ide.ps1 -Source $env:VSCODE_SOURCE
+
+      - name: Report what was built
+        shell: pwsh
+        run: |
+          $built = 'C:\lexiqode\VSCode-win32-x64'
+          if (-not (Test-Path $built)) { throw "no build at $built" }
+          $product = Get-Content "$built\resources\app\product.json" -Raw | ConvertFrom-Json
+          Write-Host "identity:  $($product.nameLong)"
+          Write-Host "profile:   $($product.dataFolderName)"
+          Write-Host "gallery:   $($product.extensionsGallery.serviceUrl)"
+          Write-Host "telemetry: $($product.enableTelemetry)"
+          $extension = "$built\resources\app\extensions\lexiqode"
+          if (-not (Test-Path "$extension\out\extension.js")) {
+            throw "the agent was not installed into the build"
+          }
+          if (-not (Test-Path "$built\resources\lexiqode-core\lexiqode\server\http.py")) {
+            throw "the core was not bundled into the build"
+          }
+          Write-Host "agent:     built-in extension + bundled core"
+          $size = [int]((Get-ChildItem $built -Recurse -File | Measure-Object Length -Sum).Sum / 1MB)
+          Write-Host "size:      $size MB"
+
+      - name: Upload the IDE
+        uses: actions/upload-artifact@v5
+        with:
+          name: LexiQode-win32-x64
+          path: C:\lexiqode\VSCode-win32-x64
+          # Long builds produce many files; the compression is worth the time.
+          compression-level: 6
+          retention-days: 14

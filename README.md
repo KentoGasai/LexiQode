@@ -1,3 +1,18 @@
+## Building the IDE
+
+The product is a patched build of the VS Code sources, so the native modules have
+to be compiled with the Microsoft C++ toolchain. See
+`docs/build-without-admin.md` for the options when the machine does not have
+installer rights - including building in CI, where that toolchain is already
+present, and running the resulting portable folder locally.
+
+With the toolchain available:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/check-prerequisites.ps1
+powershell -ExecutionPolicy Bypass -File scripts/build-ide.ps1 -Dev   # run from source
+powershell -ExecutionPolicy Bypass -File scripts/build-ide.ps1        # package
+```
 # LexiQode
 
 An AI coding editor built from open parts: the VSCodium shell plus our own agent
