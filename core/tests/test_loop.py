@@ -91,6 +91,17 @@ class PlainAnswerTest(LoopTestCase):
         self.assertEqual(roles[0], "system")
         self.assertEqual(roles.count("user"), 2)
 
+    def test_a_turn_can_run_without_tools(self) -> None:
+        loop, client = self.build([text_chunks("just the text"), text_chunks("second")])
+        result = loop.run("rewrite this selection", tools=False)
+
+        self.assertEqual(result.text, "just the text")
+        self.assertIsNone(client.calls[0]["tools"], "no tool schemas may be offered for an inline edit")
+
+        # The flag is per turn: the next normal turn offers them again.
+        loop.run("now change something")
+        self.assertIsNotNone(client.calls[1]["tools"])
+
 
 class ToolUseTest(LoopTestCase):
     def test_read_then_answer(self) -> None:

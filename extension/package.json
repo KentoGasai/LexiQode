@@ -1,0 +1,205 @@
+{
+  "name": "lexiqode",
+  "displayName": "LexiQode",
+  "description": "AI coding agent for VSCodium and VS Code, driven by any OpenAI-compatible model you point it at.",
+  "version": "1.0.0",
+  "publisher": "lexiqode",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "AI",
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onView:lexiqode.chat",
+    "onCommand:lexiqode.openChat",
+    "onCommand:lexiqode.inlineEdit",
+    "onCommand:lexiqode.setApiKey",
+    "onCommand:lexiqode.restartCore"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "lexiqode",
+          "title": "LexiQode",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "lexiqode": [
+        {
+          "id": "lexiqode.chat",
+          "name": "Agent",
+          "type": "webview"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "lexiqode.openChat",
+        "title": "Open Agent",
+        "category": "LexiQode",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "lexiqode.inlineEdit",
+        "title": "Edit Selection with AI",
+        "category": "LexiQode"
+      },
+      {
+        "command": "lexiqode.newSession",
+        "title": "New Session",
+        "category": "LexiQode"
+      },
+      {
+        "command": "lexiqode.cancelTurn",
+        "title": "Stop the Running Turn",
+        "category": "LexiQode"
+      },
+      {
+        "command": "lexiqode.restartCore",
+        "title": "Restart the Core",
+        "category": "LexiQode"
+      },
+      {
+        "command": "lexiqode.setApiKey",
+        "title": "Set the Model API Key",
+        "category": "LexiQode"
+      },
+      {
+        "command": "lexiqode.showCoreLog",
+        "title": "Show Core Log",
+        "category": "LexiQode"
+      },
+      {
+        "command": "lexiqode.showCoreInfo",
+        "title": "Show Core Status",
+        "category": "LexiQode"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "lexiqode.inlineEdit",
+          "when": "editorHasSelection",
+          "group": "1_modification@9"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "lexiqode.newSession",
+          "when": "view == lexiqode.chat",
+          "group": "navigation@1"
+        },
+        {
+          "command": "lexiqode.cancelTurn",
+          "when": "view == lexiqode.chat",
+          "group": "navigation@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "lexiqode.cancelTurn",
+          "when": "false"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "lexiqode.inlineEdit",
+        "key": "ctrl+alt+k",
+        "mac": "cmd+alt+k",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "lexiqode.openChat",
+        "key": "ctrl+alt+l",
+        "mac": "cmd+alt+l"
+      }
+    ],
+    "configuration": {
+      "title": "LexiQode",
+      "properties": {
+        "lexiqode.pythonPath": {
+          "type": "string",
+          "default": "python",
+          "description": "Interpreter used to run the LexiQode core."
+        },
+        "lexiqode.coreRoot": {
+          "type": "string",
+          "default": "",
+          "description": "Folder containing the 'lexiqode' Python package. Leave empty to use the workspace or the bundled copy."
+        },
+        "lexiqode.baseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Base URL of an OpenAI-compatible endpoint, for example https://gateway.example.com/v1. Leave empty to use the core's own settings file."
+        },
+        "lexiqode.model": {
+          "type": "string",
+          "default": "",
+          "description": "Model id sent to the endpoint. Leave empty to use the core's own settings file."
+        },
+        "lexiqode.autoApproveReads": {
+          "type": "boolean",
+          "default": true,
+          "description": "Let the agent read files and search the workspace without asking."
+        },
+        "lexiqode.autoApproveWrites": {
+          "type": "boolean",
+          "default": false,
+          "description": "Let the agent change files without asking. Off by default."
+        },
+        "lexiqode.autoApproveCommands": {
+          "type": "boolean",
+          "default": false,
+          "description": "Let the agent run shell commands without asking. Off by default."
+        },
+        "lexiqode.maxSteps": {
+          "type": "number",
+          "default": 40,
+          "minimum": 1,
+          "maximum": 200,
+          "description": "Upper bound on model round trips in one turn."
+        },
+        "lexiqode.showDiffs": {
+          "type": "boolean",
+          "default": true,
+          "description": "Open a diff editor when the agent changes a file."
+        },
+        "lexiqode.revealChangedFile": {
+          "type": "boolean",
+          "default": true,
+          "description": "Open the changed file when the agent creates a new one."
+        },
+        "lexiqode.attachToRunningCore": {
+          "type": "boolean",
+          "default": true,
+          "description": "Reuse a core already running for this workspace instead of starting a second one."
+        },
+        "lexiqode.inlineEditModel": {
+          "type": "string",
+          "default": "",
+          "description": "Model id used for Ctrl+Alt+K edits. Empty means the default model."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -w -p .",
+    "test:client": "node test/client.test.js",
+    "test:activation": "node test/activation.test.js",
+    "test": "npm run test:activation && npm run test:client"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.4.0"
+  }
+}

@@ -77,11 +77,12 @@ with the core.
 | GET | `/api/ping` | yes | - | `{"ok":true,"pong":true}` |
 | GET | `/api/events` | yes | - | SSE stream (section 6) |
 | PUT | `/api/settings` | yes | patch | updated redacted settings |
-| POST | `/api/chat` | yes | `{"message": "..."}` | `202` once the turn started |
+| POST | `/api/chat` | yes | `{"message": "...", "tools"?: bool}` | `202` once the turn started |
 | POST | `/api/cancel` | yes | - | cancels the turn and pending approvals |
 | POST | `/api/reset` | yes | - | clears the conversation |
 | POST | `/api/approval` | yes | `{"id","approved","remember","reason"}` | `{"delivered": bool}` |
 | POST | `/api/models` | yes | `{"profile"?: "id"}` | model ids from the endpoint |
+| POST | `/api/complete` | yes | `{"prompt", "system"?, "max_tokens"?, "temperature"?, "profile"?, "model"?}` | `{"text": "..."}` |
 | POST | `/api/shutdown` | yes | - | stops the core |
 
 Responses are JSON. Failures use the right status code and a body of the shape
@@ -93,6 +94,15 @@ endpoint failed.
 Progress and the answer arrive on `/api/events`. Only one turn runs per workspace
 at a time, and a second `POST /api/chat` while one is running is rejected with
 `400`.
+
+`tools: false` runs that turn without offering any tool schema to the model. It
+exists for requests whose answer is a piece of text rather than a plan. The flag
+applies to one turn only and defaults to `true`.
+
+`/api/complete` is a third kind of request: a one-shot completion that is **not**
+a turn. It does not touch the conversation, it cannot call a tool, and it uses
+its own model client, so it never collides with a running turn and never appears
+in the transcript. `system` is optional; the result is the model's text verbatim.
 
 `PUT /api/settings` accepts a partial patch:
 

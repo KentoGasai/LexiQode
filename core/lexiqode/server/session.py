@@ -16,7 +16,7 @@ import json
 import queue
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable
 
@@ -26,6 +26,8 @@ from ..agent.tools.base import ApprovalDecision, ApprovalRequest
 from ..agent.tools.registry import ToolRegistry, default_registry
 from ..config import ModelProfile, Settings, sessions_dir
 from ..errors import ConfigError, WorkspaceError
+from ..llm.openai import OpenAIChatClient
+from ..llm.types import system_message, user_message
 from ..version import PROTOCOL_VERSION, __version__
 
 RULES_FILES = ("LEXIQODE.md", "AGENTS.md", ".lexiqode/rules.md")
@@ -176,8 +178,12 @@ class CoreSession:
                 self._loop.close()
             self._loop = None
 
-    def start_turn(self, message: str) -> dict[str, Any]:
-        """Run a turn on a worker thread; events flow through the bus."""
+    def start_turn(self, message: str, *, tools: bool = True) -> dict[str, Any]:
+        """Run a turn on a worker thread; events flow through the bus.
+
+        With ``tools=False`` the model answers without any tool schemas, which is
+        what an inline edit needs: one piece of text to insert, not a plan.
+        """
 
         text = (message or "").strip()
         if not text:
@@ -186,14 +192,14 @@ class CoreSession:
             raise ConfigError("a turn is already running in this workspace")
 
         self._turn = TurnState(running=True, started_at=time.time(), message=text)
-        self._thread = threading.Thread(target=self._run_turn, args=(text,), daemon=True)
+        self._thread = threading.Thread(target=self._run_turn, args=(text, tools), daemon=True)
         self._thread.start()
-        return {"started": True, "message": text}
+        return {"started": True, "message": text, "tools": bool(tools)}
 
-    def _run_turn(self, text: str) -> None:
+    def _run_turn(self, text: str, tools: bool) -> None:
         try:
             loop = self.loop()
-            result = loop.run(text)
+            result = loop.run(text, tools=tools)
             self._turn.result = result
             save_history(self._workspace, loop.messages)
         except Exception as exc:  # reported to the client verbatim
@@ -231,6 +237,68 @@ class CoreSession:
             request_id,
             ApprovalDecision(approved=approved, remember=remember, reason=reason),
         )
+
+    def complete(
+        self,
+        prompt: str,
+        *,
+        system: str | None = None,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        profile_id: str | None = None,
+        model: str | None = None,
+    ) -> str:
+        """One-shot text completion, outside the conversation.
+
+        Deliberately not a turn: it does not touch the history, it cannot call a
+        tool, and it uses its own client, so an inline edit never collides with a
+        running chat turn or shows up in the transcript.
+        """
+
+        text = (prompt or "").strip()
+        if not text:
+            raise ConfigError("the prompt is empty")
+        profile = self.settings.effective_profile(profile_id) if profile_id else self.profile()
+        if model:
+            # An editor feature may want a different model than the chat, for
+            # example a fast one for inline edits.
+            profile = replace(profile, model=model)
+        messages = []
+        if system:
+            messages.append(system_message(system))
+        messages.append(user_message(text))
+
+        client = (
+            self._client_factory(profile) if self._client_factory else OpenAIChatClient(profile, timeout=180.0)
+        )
+        try:
+            message = client.complete(messages, None, max_tokens=max_tokens, temperature=temperature)
+        finally:
+            try:
+                client.close()
+            except Exception:  # noqa: BLE001 - cleanup must not mask the result
+                pass
+        content = message.get("content") if isinstance(message, dict) else None
+        return content if isinstance(content, str) else ""
+
+    def list_models(self, profile_id: str | None = None) -> list[str]:
+        """Ask the configured endpoint which models it serves.
+
+        Routed through the session like every other model call, so a single
+        place decides which client talks to an endpoint.
+        """
+
+        profile = self.settings.effective_profile(profile_id) if profile_id else self.profile()
+        client = (
+            self._client_factory(profile) if self._client_factory else OpenAIChatClient(profile, timeout=15.0)
+        )
+        try:
+            return list(client.list_models())
+        finally:
+            try:
+                client.close()
+            except Exception:  # noqa: BLE001 - cleanup must not mask the result
+                pass
 
     def state(self) -> dict[str, Any]:
         profile = self.profile()

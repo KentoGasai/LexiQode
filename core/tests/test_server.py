@@ -54,7 +54,7 @@ class ServerTestCase(unittest.TestCase):
             self.workspace,
             settings,
             bus=EventBus(),
-            client_factory=lambda _profile: self.client,
+            client_factory=self.make_client_factory(),
         )
         self.server = CoreServer(self.session, token="test-token").start()
         self.addCleanup(self.session.close)
@@ -65,6 +65,11 @@ class ServerTestCase(unittest.TestCase):
     def _restore_env(self) -> None:
         os.environ.pop("LEXIQODE_CONFIG_DIR", None)
         os.environ.pop("LEXIQODE_DATA_DIR", None)
+
+    def make_client_factory(self):
+        """Hook so a test can observe the profile the session resolved."""
+
+        return lambda _profile: self.client
 
     def get(self, path: str, **kwargs):
         return httpx.get(f"{self.base}{path}", headers=self.headers, timeout=5.0, **kwargs)
@@ -232,6 +237,98 @@ class ToolTurnTest(ServerTestCase):
         self.assertIn("event: turn_start", blob)
         self.assertIn("event: tool_start", blob)
         self.assertIn("event: turn_end", blob)
+
+
+class ToolToggleTest(ServerTestCase):
+    script = [text_chunks("only text, no tools")]
+
+    def test_tools_default_to_enabled(self) -> None:
+        response = self.post("/api/chat", {"message": "do something"})
+        self.assertTrue(response.json()["tools"])
+        self.wait_for_turn()
+        self.assertIsNotNone(self.client.calls[0]["tools"])
+
+    def test_tools_can_be_disabled_for_one_turn(self) -> None:
+        response = self.post("/api/chat", {"message": "rewrite this", "tools": False})
+        self.assertEqual(response.status_code, 202)
+        self.assertFalse(response.json()["tools"])
+        self.wait_for_turn()
+        self.assertIsNone(
+            self.client.calls[0]["tools"],
+            "an inline edit must not be able to call tools",
+        )
+
+
+class CompleteTest(ServerTestCase):
+    script = [text_chunks("rewritten code")]
+
+    def make_client_factory(self):
+        self.seen_profiles = []
+
+        def factory(profile):
+            self.seen_profiles.append(profile)
+            return self.client
+
+        return factory
+
+    def test_complete_answers_without_touching_the_conversation(self) -> None:
+        response = self.post("/api/complete", {"prompt": "rewrite this", "system": "be terse"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["text"], "rewritten code")
+
+        # A one-shot request is not a turn: no history, no tool schemas.
+        self.assertEqual(self.get("/api/history").json()["messages"], [])
+        self.assertIsNone(self.client.calls[0]["tools"])
+        self.assertTrue(self.client.calls[0].get("complete"))
+        roles = [message["role"] for message in self.client.calls[0]["messages"]]
+        self.assertEqual(roles, ["system", "user"])
+
+    def test_empty_prompt_is_rejected(self) -> None:
+        response = self.post("/api/complete", {"prompt": "   "})
+        self.assertEqual(response.status_code, 400)
+
+    def test_model_can_be_overridden_for_one_request(self) -> None:
+        self.post("/api/complete", {"prompt": "rewrite", "model": "fast-model"})
+        self.assertEqual(self.seen_profiles[0].model, "fast-model")
+
+    def test_the_default_model_is_used_without_an_override(self) -> None:
+        self.post("/api/complete", {"prompt": "rewrite"})
+        self.assertEqual(self.seen_profiles[0].model, "test-model")
+
+
+class ProviderFailureTest(ServerTestCase):
+    """A failing endpoint must become an answer, never a dropped connection."""
+
+    def make_client_factory(self):
+        from lexiqode.errors import ProviderError
+
+        class BrokenClient:
+            def complete(self, *_args, **_kwargs):
+                raise ProviderError("endpoint refused the request", status=500)
+
+            def stream(self, *_args, **_kwargs):
+                raise ProviderError("endpoint refused the request", status=500)
+
+            def list_models(self, *_args, **_kwargs):
+                raise ProviderError("endpoint refused the request", status=500)
+
+            def close(self) -> None:
+                return
+
+        return lambda _profile: BrokenClient()
+
+    def test_complete_reports_the_provider_failure(self) -> None:
+        response = self.post("/api/complete", {"prompt": "rewrite"})
+        self.assertEqual(response.status_code, 502)
+        body = response.json()
+        self.assertFalse(body["ok"])
+        self.assertIn("endpoint refused", body["error"])
+        self.assertEqual(body["provider_status"], 500)
+
+    def test_models_reports_the_provider_failure(self) -> None:
+        response = self.post("/api/models", {})
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json()["provider_status"], 500)
 
 
 class ApprovalTest(ServerTestCase):

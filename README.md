@@ -29,10 +29,14 @@ feature matrix we work from - lives in `docs/cursor/`.
 
 | part | state |
 |---|---|
-| `core/` agent runtime | **working**, 107 tests plus a 24-check end-to-end smoke test |
+| `core/` agent runtime | **working**, 116 tests plus a 24-check end-to-end smoke test |
 | `docs/protocol.md` contract | **frozen** at protocol 1 |
-| `extension/` VSCodium glue | not started |
+| `extension/` VSCodium glue | **working**, verified inside a real VSCodium |
 | `vscodium/` fork and branding | not started |
+
+The extension side is finished for the first slice: agent panel, approval flow,
+diff review and inline edit. What remains is the branded shell and the deeper
+Cursor-style surfaces (tab completion, project indexing); both are additive.
 
 ## Quick start
 
@@ -51,8 +55,46 @@ python -m lexiqode chat                   # try the agent
 Then, from the repository root:
 
 ```bash
-python scripts/smoke_core.py              # full end-to-end run against a local fake provider
+python scripts/smoke_core.py                     # end-to-end run against a local fake provider
 ```
+
+## Use it in the editor
+
+```powershell
+# 1. get VSCodium (portable, verified against the published sha256)
+powershell -ExecutionPolicy Bypass -File scripts\install-vscodium.ps1
+
+# 2. build and install the extension
+powershell -ExecutionPolicy Bypass -File scripts\install-extension.ps1
+```
+
+Start VSCodium, open a folder, and click the LexiQode icon in the activity bar.
+Point the agent at your endpoint with `LexiQode: Set the Model API Key` plus
+`lexiqode.baseUrl` / `lexiqode.model`, or configure the core itself with
+`python -m lexiqode config set ...` and leave the editor settings empty.
+
+Inside the editor:
+
+| action | how |
+|---|---|
+| ask for a change | type in the panel; the agent edits files and runs tests |
+| approve a risky step | inline card in the panel, or a modal dialog when it is collapsed |
+| review a file change | the diff opens automatically; the panel keeps a "review change" link |
+| rewrite a selection | select code, then `Ctrl+Alt+K` |
+| stop a turn | `Stop` in the panel, or `LexiQode: Stop the Running Turn` |
+
+## Verifying it
+
+Three levels, cheapest first:
+
+| command | what it proves |
+|---|---|
+| `cd core; python -m unittest discover -s tests -t .` | the agent loop, tools, approvals and HTTP surface (116 tests) |
+| `cd extension; npm test` | the client against a real core process, and activation with a stubbed editor (12 tests) |
+| `powershell -File scripts\test-in-editor.ps1` | the extension loaded and running inside a real VSCodium: activation, commands, settings schema, a real core spawn, the handshake, token enforcement, the view revealing |
+
+The in-editor run uses a throwaway user profile and a core pointed at a closed
+port, so it needs no model, no key and touches none of your own settings.
 
 ## How the pieces fit
 
@@ -81,6 +123,16 @@ implied:
 * the API binds to loopback and requires a token that is generated per process
   and never stored;
 * the token is never exposed to the webview that renders the UI.
+
+## Layout
+
+```
+core/               the agent runtime: loop, tools, approvals, HTTP + SSE API
+extension/          the editor glue: panel, diffs, inline edit, core lifecycle
+docs/protocol.md    the UI <-> core contract, frozen at protocol 1
+docs/cursor/        what was measured on Cursor and the feature matrix
+scripts/            installers, the end-to-end smoke test, the in-editor runner
+```
 
 ## Scope
 

@@ -53,6 +53,15 @@ class FakeClient:
             raise AssertionError("FakeClient ran out of scripted responses")
         yield from self.script.pop(0)
 
+    def complete(self, messages: list[dict[str, Any]], tools: Any = None, **_kwargs: Any) -> dict[str, Any]:
+        """Non-streaming path, used by one-shot requests such as an inline edit."""
+
+        self.calls.append({"messages": list(messages), "tools": tools, "complete": True})
+        if not self.script:
+            raise AssertionError("FakeClient ran out of scripted responses")
+        text = "".join(chunk.text for chunk in self.script.pop(0))
+        return {"role": "assistant", "content": text}
+
     def close(self) -> None:
         self.closed = True
 

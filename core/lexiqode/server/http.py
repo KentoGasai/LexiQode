@@ -31,7 +31,6 @@ from urllib.parse import parse_qs, urlparse
 from ..agent.events import EventBus
 from ..config import AgentSettings, ModelProfile, Settings
 from ..errors import ConfigError, LexiQodeError, ProviderError
-from ..llm.openai import OpenAIChatClient
 from ..version import PROTOCOL_VERSION, PRODUCT_NAME, __version__
 from .session import CoreSession
 
@@ -297,7 +296,10 @@ class _RequestHandler(BaseHTTPRequestHandler):
         try:
             body = self._read_json()
             if path == "/api/chat":
-                result = session.start_turn(str(body.get("message") or ""))
+                result = session.start_turn(
+                    str(body.get("message") or ""),
+                    tools=bool(body.get("tools", True)),
+                )
                 self._send(HTTPStatus.ACCEPTED, {"ok": True, **result})
             elif path == "/api/cancel":
                 self._send(HTTPStatus.OK, {"ok": True, **session.cancel()})
@@ -314,13 +316,18 @@ class _RequestHandler(BaseHTTPRequestHandler):
                 self._send(HTTPStatus.OK, {"ok": True, "delivered": delivered})
             elif path == "/api/models":
                 self._send(HTTPStatus.OK, {"ok": True, "models": self._probe_models(body)})
+            elif path == "/api/complete":
+                self._send(HTTPStatus.OK, {"ok": True, "text": self._complete(body)})
             elif path == "/api/shutdown":
                 self._send(HTTPStatus.OK, {"ok": True, "stopping": True})
                 threading.Thread(target=app.stop, daemon=True).start()
             else:
                 self._error(HTTPStatus.NOT_FOUND, f"no route for POST {path}")
         except ProviderError as exc:
-            self._error(HTTPStatus.BAD_GATEWAY, str(exc), status=exc.status)
+            # The keyword must not be named "status": it would clash with the
+            # positional status argument and the handler would raise a TypeError
+            # instead of answering, which looks like a dropped connection.
+            self._error(HTTPStatus.BAD_GATEWAY, str(exc), provider_status=exc.status)
         except LexiQodeError as exc:
             self._error(HTTPStatus.BAD_REQUEST, str(exc))
 
@@ -359,11 +366,22 @@ class _RequestHandler(BaseHTTPRequestHandler):
         """Ask the configured endpoint which models it serves."""
 
         session = self.server_app.session
-        profile = session.settings.effective_profile(
-            str(body.get("profile") or "") or None
+        return session.list_models(str(body.get("profile") or "") or None)
+
+    def _complete(self, body: dict[str, Any]) -> str:
+        """One-shot completion used by editor features such as an inline edit."""
+
+        session = self.server_app.session
+        max_tokens = body.get("max_tokens")
+        temperature = body.get("temperature")
+        return session.complete(
+            str(body.get("prompt") or ""),
+            system=str(body.get("system") or "") or None,
+            max_tokens=int(max_tokens) if isinstance(max_tokens, (int, float)) else None,
+            temperature=float(temperature) if isinstance(temperature, (int, float)) else None,
+            profile_id=str(body.get("profile") or "") or None,
+            model=str(body.get("model") or "") or None,
         )
-        with OpenAIChatClient(profile) as client:
-            return client.list_models()
 
     def _stream_events(self) -> None:
         """Open the SSE channel and pump events until the client goes away."""

@@ -68,6 +68,9 @@ class AgentLoop:
         self._system = build_system_prompt(self.workspace, registry, extra_rules=extra_rules)
         self._cancel = threading.Event()
         self._max_history = max(10, max_history_messages)
+        # Whether the current turn may call tools. Inline edits turn this off so
+        # the answer is a single piece of text the editor can insert directly.
+        self._tools_enabled = True
 
     @property
     def messages(self) -> list[dict[str, Any]]:
@@ -89,8 +92,9 @@ class AgentLoop:
         return json.dumps(self._history, ensure_ascii=False)
 
     # ------------------------------------------------------------------ the loop
-    def run(self, user_text: str) -> LoopResult:
+    def run(self, user_text: str, *, tools: bool = True) -> LoopResult:
         self._cancel.clear()
+        self._tools_enabled = bool(tools) and self.profile.supports_tools
         self._history.append(user_message(user_text))
         self._emit("turn_start", {"model": self.profile.model, "profile": self.profile.id})
 
@@ -169,9 +173,9 @@ class AgentLoop:
 
         accumulator = StreamAccumulator()
         payload = [{"role": "system", "content": self._system}, *self._history]
-        tools = self.registry.schemas() if self.profile.supports_tools else None
+        tool_schemas = self.registry.schemas() if self._tools_enabled else None
 
-        for chunk in self._client.stream(payload, tools):
+        for chunk in self._client.stream(payload, tool_schemas):
             if self._cancel.is_set():
                 break
             accumulator.feed(chunk)
