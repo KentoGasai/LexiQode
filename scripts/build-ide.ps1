@@ -27,8 +27,13 @@
 #>
 
 param(
-    [string]$Source = 'C:\lexiqode\vscode',
-    [string]$Out = 'C:\lexiqode\out',
+    # An explicit -Source wins, then the environment, then the local clone this
+    # repository was developed against. A CI runner has none of the three, which
+    # is why it always passes -Source.
+    [string]$Source = $(if ($env:VSCODE_SOURCE) { $env:VSCODE_SOURCE } else { 'C:\lexiqode\vscode' }),
+    # Empty means "leave the packaged build next to the source tree", which is the
+    # least surprising place for it and needs no writable C:\lexiqode.
+    [string]$Out = '',
     [switch]$Dev,
     [switch]$SkipInstall,
     [string]$Workspace
@@ -113,9 +118,66 @@ foreach ($property in $overlay.PSObject.Properties) {
         $changed++
     }
 }
+Write-Host "  $changed field(s) set; identity is now '$($current.nameLong)'"
+
+Write-Step 'removing vendor service endpoints'
+# The sources name other vendors' services in product.json, and two kinds of them
+# matter: sign-up and billing links under defaultChatAgent, and the entitlement
+# and token endpoints the chat surface would call on behalf of an account. This
+# product is meant to work with a user's own endpoint and no account, so every URL
+# to those hosts is emptied. The host list is shared with scripts/check_branding.py
+# so the transform and the release check cannot disagree.
+$hosts = @(
+    Get-Content (Join-Path $repo 'ide\vendor-hosts.txt') |
+        ForEach-Object { $_.Trim() } |
+        Where-Object { $_ -and -not $_.StartsWith('#') }
+)
+if (-not $hosts) { throw 'ide/vendor-hosts.txt lists no hosts; refusing to guess what is ours' }
+$vendorPattern = '^https?://([a-z0-9-]+\.)*(' +
+    (($hosts | ForEach-Object { [regex]::Escape($_) }) -join '|') + ')([:/]|$)'
+
+# The two download feeds are build inputs, not runtime services: they are read
+# while packaging to fetch Node and Electron and never contacted by the installed
+# product. scripts/check_branding.py exempts the same two keys, so the transform
+# and the release check stay in step.
+function Clear-VendorUrlExcept {
+    param($Node, [string[]]$SkipKeys)
+    if ($null -eq $Node -or $Node -is [string]) { return 0 }
+    if ($Node -is [System.Collections.IEnumerable]) {
+        $sum = 0
+        foreach ($item in $Node) { $sum += Clear-VendorUrlExcept -Node $item -SkipKeys $SkipKeys }
+        return $sum
+    }
+    $total = 0
+    foreach ($property in @($Node.PSObject.Properties)) {
+        if ($SkipKeys -contains $property.Name) { continue }
+        if ($property.Value -is [string]) {
+            # Only values held by a key are emptied. A URL inside an array has no
+            # key to set to an empty string, and replacing the element would
+            # silently change the length of a list whose meaning is unknown; the
+            # release check reports those instead. scripts/check_branding.py
+            # behaves identically, and its tests pin that.
+            if ($property.Value -match $vendorPattern) {
+                $Node.$($property.Name) = ''
+                $total++
+            }
+        } else {
+            $total += Clear-VendorUrlExcept -Node $property.Value -SkipKeys $SkipKeys
+        }
+    }
+    return $total
+}
+
+$emptied = Clear-VendorUrlExcept -Node $current -SkipKeys @('nodejsArtifactFeed', 'electronArtifactFeed')
+Write-Host "  $emptied vendor URL(s) emptied"
+if ($emptied -eq 0) {
+    # Worth noticing rather than passing silently: it either means upstream cleaned
+    # them up, in which case this step can go, or that the pattern stopped matching.
+    Write-Host '  note: no vendor endpoints were found in product.json' -ForegroundColor Yellow
+}
+
 $json = $current | ConvertTo-Json -Depth 40
 [System.IO.File]::WriteAllText($product, $json, (New-Object System.Text.UTF8Encoding($false)))
-Write-Host "  $changed field(s) set; identity is now '$($current.nameLong)'"
 
 # ------------------------------------------------------------------ compile
 

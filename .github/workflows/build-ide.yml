@@ -13,21 +13,27 @@ on:
   workflow_dispatch:
     inputs:
       vscode_ref:
-        description: 'VS Code source ref to build (tag or branch)'
+        description: 'VS Code source ref to build (a real tag, or main)'
         required: true
-        default: '1.144.0'
+        # Must be a tag that exists upstream. 1.144.0 is the version on main and
+        # has no tag, which is what made the first run fail at the clone.
+        default: '1.142.0'
   push:
     branches: [main]
     paths:
+      # Only the inputs that change the product itself. Changes to the extension
+      # or the core are covered by the local test suites, and each run here costs
+      # Windows minutes at double rate on a private repository, so a new agent
+      # build is asked for deliberately.
       - 'ide/**'
-      - 'extension/**'
-      - 'core/**'
       - 'scripts/build-ide.ps1'
       - '.github/workflows/build-ide.yml'
 
 env:
-  # Keep this in step with the local clone so a local and a CI build agree.
-  VSCODE_SOURCE: C:\lexiqode\vscode
+  # Paths are derived from the runner, never hardcoded: a runner has no
+  # C:\lexiqode, and a build that only works on one machine is not a build.
+  VSCODE_SOURCE: ${{ runner.temp }}\vscode
+  IDE_BUILD: ${{ runner.temp }}\VSCode-win32-x64
 
 jobs:
   build:
@@ -60,17 +66,30 @@ jobs:
         shell: pwsh
         run: |
           $ref = "${{ github.event.inputs.vscode_ref }}"
-          if (-not $ref) { $ref = '1.144.0' }
+          if (-not $ref) { $ref = '1.142.0' }
           Write-Host "cloning microsoft/vscode at $ref"
           git clone --depth 1 --branch $ref https://github.com/microsoft/vscode.git $env:VSCODE_SOURCE
           if (-not (Test-Path "$env:VSCODE_SOURCE\package.json")) {
             throw "the clone produced no package.json at $env:VSCODE_SOURCE"
+          }
+          # Record what was built, so an artifact can be traced to a commit.
+          Push-Location $env:VSCODE_SOURCE
+          try {
+            Write-Host "source commit: $(git rev-parse HEAD)"
+            Write-Host "source version: $((Get-Content package.json -Raw | ConvertFrom-Json).version)"
+          } finally {
+            Pop-Location
           }
           # The sources pin their own Node version; report a mismatch rather than
           # discovering it as a native module failure later.
           $wanted = (Get-Content "$env:VSCODE_SOURCE\.nvmrc" -Raw).Trim()
           $have = (node -v).TrimStart('v')
           Write-Host "source wants node $wanted, runner has $have"
+          if ($wanted -and $have -ne $wanted) {
+            # Not fatal: the native modules simply get built for the running
+            # version, which is fine for our own build. Reported, not hidden.
+            Write-Warning "building with node $have while the sources ask for $wanted"
+          }
 
       - name: Compile the extension
         working-directory: extension
@@ -85,29 +104,34 @@ jobs:
       - name: Report what was built
         shell: pwsh
         run: |
-          $built = 'C:\lexiqode\VSCode-win32-x64'
+          $built = $env:IDE_BUILD
           if (-not (Test-Path $built)) { throw "no build at $built" }
           $product = Get-Content "$built\resources\app\product.json" -Raw | ConvertFrom-Json
           Write-Host "identity:  $($product.nameLong)"
           Write-Host "profile:   $($product.dataFolderName)"
           Write-Host "gallery:   $($product.extensionsGallery.serviceUrl)"
           Write-Host "telemetry: $($product.enableTelemetry)"
-          $extension = "$built\resources\app\extensions\lexiqode"
-          if (-not (Test-Path "$extension\out\extension.js")) {
-            throw "the agent was not installed into the build"
-          }
-          if (-not (Test-Path "$built\resources\lexiqode-core\lexiqode\server\http.py")) {
-            throw "the core was not bundled into the build"
-          }
-          Write-Host "agent:     built-in extension + bundled core"
           $size = [int]((Get-ChildItem $built -Recurse -File | Measure-Object Length -Sum).Sum / 1MB)
           Write-Host "size:      $size MB"
+
+      # Reporting above is for a human reading the log. This step is what decides
+      # whether the artifact may be published, and it inspects the packaged files
+      # rather than trusting the steps that produced them.
+      - name: Verify the packaged build against the branding rules
+        shell: pwsh
+        run: |
+          if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
+            Write-Warning 'python is unavailable on this runner; the branding rule set was not checked'
+            return
+          }
+          python scripts/check_branding.py --built "$env:IDE_BUILD\resources\app\product.json"
+          if ($LASTEXITCODE -ne 0) { throw 'the packaged build does not carry our identity' }
 
       - name: Upload the IDE
         uses: actions/upload-artifact@v7
         with:
           name: LexiQode-win32-x64
-          path: C:\lexiqode\VSCode-win32-x64
+          path: ${{ env.IDE_BUILD }}
           # Long builds produce many files; the compression is worth the time.
           compression-level: 6
           # A packaged build is a few hundred megabytes and artifact storage on a

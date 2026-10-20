@@ -29,9 +29,38 @@ pinned tag, compile the extension, brand `product.json`, package
 `vscode-win32-x64`, fold the agent in as a built-in extension and the Python core
 beside it, then upload the folder as an artifact.
 
+The ref must be a tag that exists upstream. `1.144.0` looks plausible but is only
+the version on `main`: there is no such tag, and `git clone --branch 1.144.0`
+fails with `Remote branch not found`. The newest real tag is `1.142.0`, and that
+is the default. Everything that follows the clone is derived from the runner, not
+from a hardcoded path, because a build that only works on one machine is not a
+build.
+
+To start one: **Actions -> Build the IDE -> Run workflow**. A push starts a build
+only when it touches `ide/**`, the build script or the workflow itself. Changes to
+the agent are covered by the local suites, and each run costs Windows minutes at
+a 2x multiplier on a private repository, so a build with a new agent is asked for
+deliberately.
+
+Before the artifact is uploaded, `scripts/check_branding.py --built` inspects the
+packaged files: identity, telemetry, gallery, and that no URL points at a vendor
+service. The log's "what was built" section is for a human; the check is what
+decides whether the artifact may be published.
+
 Cost: a build takes roughly half an hour, and Windows runner minutes are free for
 public repositories. A private repository spends its included quota at a 2x
 multiplier for Windows.
+
+## Running what comes back
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/use-artifact.ps1 `
+  -Zip "$env:USERPROFILE\Downloads\LexiQode-win32-x64.zip" -Launch
+```
+
+It unpacks to `%LOCALAPPDATA%\Programs\LexiQode` and verifies the identity,
+profile, telemetry, gallery, built-in agent, bundled core and launcher before
+starting anything. No installation and no privileges are involved.
 
 ## 2. Borrow the prebuilt native binaries locally
 
@@ -82,9 +111,38 @@ first.
 - the sources, cloned and branded: `ide/product.overlay.json` is applied to the
   real `product.json` and verified, including the removal of the leftovers that
   named Microsoft services
+- the vendor endpoints: `ide/vendor-hosts.txt` lists the hosts that belong to
+  another vendor, and the build empties every URL in `product.json` pointing at
+  one of them. On the current sources that is fifteen URLs, all under
+  `defaultChatAgent`: nine `aka.ms` links about Copilot plans and billing, and the
+  entitlement, token and managed-settings calls to `api.github.com`. The same host
+  list drives `scripts/check_branding.py`, so the transform and the release check
+  cannot drift apart
 - `scripts/build-ide.ps1`: probes the toolchain before touching anything, applies
   branding, compiles, and either runs from source or packages
 - `scripts/check-prerequisites.ps1`: reports what a machine is missing and the one
   command that fixes it
+- `scripts/check_branding.py`: `--source` predicts what branding a given upstream
+  tag produces, `--built` verifies a packaged build. Both need no toolchain, so
+  the branding is testable on the machine that cannot compile
 - the agent: a working core and an extension with a chat panel in the secondary
   side bar, an editor tab, five modes, approvals, diffs and an inline edit
+
+## Known leftovers
+
+Removing a URL is safe: nothing that reads a link depends on it. Two things in the
+build are explicitly *not* cleaned up yet, and each check run reports them rather
+than passing over them in silence.
+
+- `defaultChatAgent.extensionId` and `.chatExtensionId` still name a vendor's chat
+  extension, and `providerExtensionId` names its authentication extension. They
+  are typed as required strings in `IDefaultChatAgent`, so they cannot simply be
+  dropped, and their meaning has to be replaced rather than emptied.
+- `extensions/copilot` ships inside the build: upstream's own chat extension. It
+  is what would offer a vendor sign-in in the built-in chat surface. Our agent
+  lives in the secondary side bar and does not use it.
+
+Neither can reach the network on its own: their endpoints are among the fifteen
+URLs that are emptied. What they can still do is put a vendor's name in front of
+the user, which is a product decision rather than a bug, and is left visible here
+until it is made.
