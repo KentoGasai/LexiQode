@@ -76,6 +76,10 @@ jobs:
           if (-not (Test-Path "$env:VSCODE_SOURCE\package.json")) {
             throw "the clone produced no package.json at $env:VSCODE_SOURCE"
           }
+          # A shallow clone is enough, and this was checked rather than assumed:
+          # the build reads the commit straight out of `.git/HEAD` (build/lib/git.ts
+          # resolves it by reading files, not by running git), and at a tag HEAD
+          # already holds the sha. There is nothing to deepen here.
           # Record what was built, so an artifact can be traced to a commit.
           Push-Location $env:VSCODE_SOURCE
           try {
@@ -105,7 +109,10 @@ jobs:
         shell: pwsh
         env:
           VSCODE_SOURCE: ${{ runner.temp }}\vscode
-        run: ./scripts/build-ide.ps1 -Source $env:VSCODE_SOURCE
+        # -NoProfile and an explicit policy: the build must not depend on shell
+        # state the runner happens to have, and a .ps1 invoked by path is otherwise
+        # subject to the session's execution policy.
+        run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/build-ide.ps1 -Source $env:VSCODE_SOURCE
 
       - name: Report what was built
         shell: pwsh
