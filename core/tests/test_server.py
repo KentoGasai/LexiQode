@@ -383,6 +383,71 @@ class ProviderFailureTest(ServerTestCase):
         self.assertEqual(response.json()["provider_status"], 500)
 
 
+class UnconfiguredProfileTest(unittest.TestCase):
+    """A fresh installation has no model yet, and must still be usable.
+
+    This is the first thing a new user meets, so the core has to come up and say
+    what is missing instead of exiting - an exit code shows up in the editor as a
+    process that died for no visible reason.
+    """
+
+    def setUp(self) -> None:
+        self._temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._temp.cleanup)
+        root = Path(self._temp.name)
+        os.environ["LEXIQODE_CONFIG_DIR"] = str(root / "cfg")
+        os.environ["LEXIQODE_DATA_DIR"] = str(root / "data")
+        self.addCleanup(self._restore_env)
+
+        self.workspace = root / "project"
+        self.workspace.mkdir()
+
+        # A profile with an endpoint but no model, which is what a user has after
+        # they set up the endpoint only.
+        settings = Settings(agent=AgentSettings(auto_approve=True, max_steps=4))
+        settings.set_profile(ModelProfile(id="default", base_url="http://provider.test", model=""))
+        settings.active_profile = "default"
+        self.session = CoreSession(self.workspace, settings, bus=EventBus(), client_factory=lambda _p: FakeClient([]))
+        self.server = CoreServer(self.session, token="test-token").start()
+        self.addCleanup(self.session.close)
+        self.addCleanup(self.server.stop)
+        self.base = self.server.base_url
+        self.headers = {"Authorization": "Bearer test-token"}
+
+    def _restore_env(self) -> None:
+        os.environ.pop("LEXIQODE_CONFIG_DIR", None)
+        os.environ.pop("LEXIQODE_DATA_DIR", None)
+
+    def test_the_server_starts_and_reports_what_is_missing(self) -> None:
+        response = httpx.get(f"{self.base}/api/state", headers=self.headers, timeout=5.0)
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertFalse(body["profile_ready"])
+        self.assertEqual(body["profile"]["model"], "")
+        # The workspace is known, so the editor can render a usable panel.
+        self.assertEqual(Path(body["workspace"]).resolve(), self.workspace.resolve())
+
+    def test_a_turn_is_refused_with_an_explanation(self) -> None:
+        response = httpx.post(
+            f"{self.base}/api/chat",
+            json={"message": "hello"},
+            headers=self.headers,
+            timeout=5.0,
+        )
+        self.assertEqual(response.status_code, 400)
+        body = response.json()
+        self.assertFalse(body["ok"])
+        self.assertIn("model", body["error"])
+
+    def test_the_mode_list_is_still_available(self) -> None:
+        # Choosing a mode must not require a working model.
+        response = httpx.get(f"{self.base}/api/state", headers=self.headers, timeout=5.0)
+        self.assertEqual(response.status_code, 200)
+        modes = response.json()["modes"]
+        self.assertGreaterEqual(len(modes), 3)
+        self.assertIn("agent", [mode["id"] for mode in modes])
+
+
 class ApprovalTest(ServerTestCase):
     script = [
         tool_chunks("write_file", {"path": "made.txt", "content": "written\n"}),

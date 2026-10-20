@@ -253,12 +253,19 @@ class Settings:
         if self.active_profile not in self.profiles:
             self.active_profile = profile.id
 
-    def effective_profile(self, profile_id: str | None = None) -> ModelProfile:
+    def effective_profile(
+        self, profile_id: str | None = None, *, require_model: bool = True
+    ) -> ModelProfile:
         """Resolve the profile the loop should use, applying environment overrides.
 
         Precedence: explicit argument -> ``LEXIQODE_PROFILE`` -> ``active_profile``
         -> the single configured profile. Environment variables then patch the
         individual fields so a shell can retarget the core without touching disk.
+
+        ``require_model=False`` describes the profile *without* insisting it is
+        usable. The daemon needs that: it has to come up and report "no model is
+        configured" so the editor can offer to set one, instead of dying on
+        startup and leaving the user with an exit code.
         """
 
         wanted = (profile_id or os.environ.get(ENV_PROFILE) or self.active_profile).strip()
@@ -277,12 +284,17 @@ class Settings:
             overrides["model"] = model
         resolved = replace(profile, **overrides).normalised()
 
-        if not resolved.model:
+        if require_model and not resolved.model:
             raise ConfigError(
                 f"profile {resolved.id!r} has no model id; set one in the editor "
                 f"settings or with {ENV_MODEL}"
             )
         return resolved
+
+    def describe_profile(self, profile_id: str | None = None) -> ModelProfile:
+        """The profile as configured, even when it is not yet usable."""
+
+        return self.effective_profile(profile_id, require_model=False)
 
     def redacted(self) -> dict[str, Any]:
         """Settings safe to log or hand to the editor."""

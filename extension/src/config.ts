@@ -53,21 +53,23 @@ export function readSettings(scope?: vscode.ConfigurationScope): EditorSettings 
 /**
  * Locate the folder that contains the `lexiqode` Python package.
  *
- * Order: the explicit setting, then a sibling `core/` folder of each workspace
- * directory (which is how this repository is laid out), then the folder the
- * extension is installed in.
+ * Order matters. A shipped shell carries its own core next to the application,
+ * and that copy must win: it is the one the product was tested with, and it does
+ * not depend on which folder the user happens to open. Only then comes the
+ * explicit setting and a `core/` folder beside each workspace directory, which is
+ * how this repository is laid out during development.
  */
 export function resolveCoreRoot(settings: EditorSettings): string | undefined {
   const candidates: string[] = [];
+  // <shell>/resources/app/extensions/lexiqode/out -> <shell>/resources/lexiqode-core
+  candidates.push(path.resolve(__dirname, '..', '..', '..', '..', 'lexiqode-core'));
   if (settings.coreRoot) {
     candidates.push(settings.coreRoot);
   }
   for (const folder of vscode.workspace.workspaceFolders ?? []) {
     candidates.push(path.join(folder.uri.fsPath, 'core'));
   }
-  if (__dirname) {
-    candidates.push(path.resolve(__dirname, '..', '..', 'core'));
-  }
+  candidates.push(path.resolve(__dirname, '..', '..', 'core'));
 
   for (const candidate of candidates) {
     const resolved = path.resolve(candidate);

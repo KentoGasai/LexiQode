@@ -9,6 +9,7 @@ import sys
 import tempfile
 import time
 import unittest
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -221,6 +222,69 @@ class ServeTest(CliTestCase):
 
         process.stdin.close()
         process.wait(timeout=15)
+
+    def test_a_fresh_install_comes_up_without_a_model(self) -> None:
+        """The first run has no settings file yet, and must not be a crash.
+
+        This is the exact case a new user meets: the editor starts the core, and
+        a core that exits with a traceback shows up as a panel that never
+        connects, with nothing to explain why.
+        """
+
+        # Deliberately no write_settings(): a fresh installation.
+        process, runtime = self.start_serve()
+        line = process.stdout.readline()
+        self.assertTrue(line.startswith(HANDSHAKE_PREFIX), f"unexpected stdout: {line!r}")
+        payload = json.loads(line[len(HANDSHAKE_PREFIX):].strip())
+
+        # It says what is missing, on stderr, without dying.
+        self.assertIsNone(process.poll(), "the core must stay up so the editor can configure it")
+        deadline = time.time() + 10.0
+        stderr = ""
+        while time.time() < deadline and "no model is configured" not in stderr:
+            time.sleep(0.05)
+        time.sleep(0.2)
+
+        def call(path: str, body: dict | None = None):
+            data = None if body is None else json.dumps(body).encode("utf-8")
+            request = urllib.request.Request(
+                f"{payload['base_url']}{path}",
+                data=data,
+                headers={
+                    "Authorization": f"Bearer {payload['token']}",
+                    "Content-Type": "application/json",
+                },
+                method="GET" if body is None else "POST",
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=5) as response:
+                    return response.status, json.loads(response.read().decode("utf-8"))
+            except urllib.error.HTTPError as exc:
+                return exc.code, json.loads(exc.read().decode("utf-8"))
+
+        status, state = call("/api/state")
+        self.assertEqual(status, 200, "the editor must be able to read the state to offer a fix")
+        self.assertFalse(state["profile_ready"])
+        self.assertEqual(state["profile"]["model"], "")
+        self.assertGreaterEqual(len(state["modes"]), 3, "modes must not depend on a model")
+
+        status, refusal = call("/api/chat", {"message": "hello"})
+        self.assertEqual(status, 400)
+        self.assertIn("model", refusal["error"])
+
+        process.stdin.close()
+        self.assertEqual(process.wait(timeout=15), 0)
+        self.assertFalse(runtime.exists())
+
+    def test_the_serve_banner_names_the_missing_model(self) -> None:
+        # A human running the core by hand should learn the same thing.
+        process, _ = self.start_serve()
+        process.stdout.readline()
+        process.stdin.close()
+        self.assertEqual(process.wait(timeout=15), 0)
+        stderr = process.stderr.read()
+        self.assertIn("no model configured", stderr)
+        self.assertIn("no model is configured yet", stderr)
 
 
 if __name__ == "__main__":

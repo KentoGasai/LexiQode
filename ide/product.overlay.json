@@ -1,0 +1,63 @@
+{
+  "_comment": [
+    "Branding merged into the product.json of a VS Code source build.",
+    "Only keys listed here are touched; everything else keeps the upstream value.",
+    "Anything compiled into the executable (taskbar icon, file descriptions) needs",
+    "the resource patch step, not this file."
+  ],
+  "nameShort": "LexiQode",
+  "nameLong": "LexiQode",
+  "applicationName": "lexiqode",
+  "dataFolderName": ".lexiqode",
+  "sharedDataFolderName": ".lexiqode-shared",
+  "urlProtocol": "lexiqode",
+  "win32DirName": "LexiQode",
+  "win32NameVersion": "LexiQode",
+  "win32MutexName": "lexiqode",
+  "win32AppUserModelId": "LexiQode.LexiQode",
+  "win32RegValueName": "LexiQode",
+  "win32ShellNameShort": "LexiQode",
+  "win32AppId": "{{1BB8B6C5-7E2F-4B5A-9F5C-2A7E2A3D51C4}}",
+  "win32x64AppId": "{{1BB8B6C5-7E2F-4B5A-9F5C-2A7E2A3D51C4}}",
+  "win32arm64AppId": "{{1BB8B6C5-7E2F-4B5A-9F5C-2A7E2A3D51C4}}",
+  "licenseName": "MIT",
+  "licenseUrl": "https://github.com/microsoft/vscode/blob/main/LICENSE.txt",
+  "serverLicenseUrl": "https://github.com/microsoft/vscode/blob/main/LICENSE.txt",
+  "enableTelemetry": false,
+  "_microsoft_remnants_comment": [
+    "The sources still name Microsoft services in several places. They are",
+    "overridden rather than left alone: a product that calls a vendor endpoint",
+    "the user never chose is exactly the kind of surprise this build exists to",
+    "avoid. Blank means 'no such service'."
+  ],
+  "voiceWsUrl": "",
+  "webviewContentExternalBaseUrlTemplate": "",
+  "darwinBundleIdentifier": "org.lexiqode.LexiQode",
+  "linuxDesktopName": "org.lexiqode.LexiQode",
+  "linuxIconName": "lexiqode",
+  "serverApplicationName": "lexiqode-server",
+  "serverDataFolderName": ".lexiqode-server",
+  "tunnelApplicationName": "lexiqode-tunnel",
+  "darwinProfileUUID": "6F2B1C74-8A41-4F0D-9C31-7B5E2A9D4F18",
+  "darwinProfilePayloadUUID": "9D3A7E28-5C64-4B19-8E7F-1A6C3D9B2E45",
+  "_gallery_comment": [
+    "The sources ship no gallery at all: the Microsoft marketplace is added only",
+    "in their proprietary build. Open VSX is the open alternative, and pointing",
+    "at it is a choice we make rather than a default we inherit."
+  ],
+  "extensionsGallery": {
+    "serviceUrl": "https://open-vsx.org/vscode/gallery",
+    "itemUrl": "https://open-vsx.org/vscode/item",
+    "resourceUrlTemplate": "https://open-vsx.org/vscode/unpackage/{publisher}/{name}/{version}/{path}",
+    "controlUrl": "https://raw.githubusercontent.com/EclipseFdn/publish-extensions/refs/heads/master/extension-control/extensions.json"
+  },
+  "tipsAndTricksUrl": "",
+  "newsletterSignupUrl": "",
+  "reportIssueUrl": "",
+  "documentationUrl": "",
+  "releaseNotesUrl": "",
+  "keyboardShortcutsUrlLinux": "",
+  "keyboardShortcutsUrlMac": "",
+  "keyboardShortcutsUrlWin": "",
+  "introductoryVideosUrl": ""
+}

@@ -146,9 +146,18 @@ class CoreSession:
         return ""
 
     def profile(self) -> ModelProfile:
+        """The profile a turn needs. Raises when it is not usable yet."""
+
         if self._profile_override is not None:
             return self._profile_override
         return self.settings.effective_profile()
+
+    def described_profile(self) -> ModelProfile:
+        """The profile for reporting only; never raises for a missing model."""
+
+        if self._profile_override is not None:
+            return self._profile_override
+        return self.settings.describe_profile()
 
     def loop(self) -> AgentLoop:
         """Build the loop on first use, and rebuild it when the profile changes."""
@@ -198,6 +207,9 @@ class CoreSession:
         # Validate the input before the state: a caller who sent a bad mode should
         # learn that, whether or not a turn happens to be running.
         resolved = get_mode(mode)
+        # A configuration problem is the caller's to fix, so it is reported on the
+        # request rather than surfacing later as a failed turn.
+        self.profile()
         if self._turn.running:
             raise ConfigError("a turn is already running in this workspace")
 
@@ -321,11 +333,14 @@ class CoreSession:
                 pass
 
     def state(self) -> dict[str, Any]:
-        profile = self.profile()
+        # Reported with a missing model allowed: the editor needs to render the
+        # panel so it can offer to fix that.
+        profile = self.described_profile()
         turn = self._turn
         return {
             "workspace": self._workspace.as_posix(),
             "profile": profile.to_public(),
+            "profile_ready": bool(profile.model and profile.base_url),
             "agent": {
                 "max_steps": self.settings.agent.max_steps,
                 "auto_approve": self.settings.agent.auto_approve,

@@ -19,14 +19,13 @@ export function activate(context: vscode.ExtensionContext): void {
   const session = new Session(log, context.secrets);
   const panel = new ChatViewProvider(context.extensionUri, session, log, context.secrets);
 
-  // Opening the project should show the agent, not an empty editor with an icon
-  // the user has to discover. This runs once per project, so it never fights a
+  // The chat lives in the secondary side bar, the way other agents do it, so
+  // opening a project should bring that side bar up rather than leave the user
+  // hunting for a command. This runs once per project, so it never fights a
   // layout the user has chosen afterwards.
   const WELCOMED = 'lexiqode.welcomed';
   if (vscode.workspace.workspaceFolders?.length && !context.workspaceState.get<boolean>(WELCOMED)) {
-    void context.workspaceState.update(WELCOMED, true).then(() =>
-      vscode.commands.executeCommand('workbench.view.extension.lexiqode')
-    );
+    void context.workspaceState.update(WELCOMED, true).then(() => revealChat());
   }
 
   // The core lives in a folder the workspace does not always contain: opening
@@ -125,6 +124,21 @@ export function activate(context: vscode.ExtensionContext): void {
 
 export function deactivate(): void {
   // Disposal is handled by the subscriptions registered in activate().
+}
+
+/**
+ * Bring the agent into view.
+ *
+ * Focusing the container is what makes the secondary side bar appear, and it is
+ * also what puts the caret in the chat. A build that does not know the container
+ * id still has the plain command, hence the fallback.
+ */
+async function revealChat(): Promise<void> {
+  try {
+    await vscode.commands.executeCommand('workbench.view.extension.lexiqode');
+  } catch {
+    void vscode.commands.executeCommand('lexiqode.openChat');
+  }
 }
 
 /**

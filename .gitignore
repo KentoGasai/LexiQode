@@ -25,6 +25,8 @@ extension/*.vsix
 vscodium/out/
 vscodium/vscode/
 vscodium/cache/
+# The assembled shell: a copy of a distribution, rebuilt by scripts/make_shell.py
+shell/
 
 # Local runtime state. Settings, sessions and the runtime descriptor live in the
 # user profile, never in the repository; project rules are the exception and do

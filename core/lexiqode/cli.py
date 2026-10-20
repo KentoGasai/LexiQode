@@ -180,7 +180,10 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         f"{PRODUCT_NAME} core {__version__} (protocol {PROTOCOL_VERSION}) listening on "
         f"{server.base_url} for {session.workspace}"
     )
-    _stderr(f"  profile: {session.profile().id} -> {session.profile().model}")
+    profile = session.described_profile()
+    _stderr(f"  profile: {profile.id} -> {profile.model or '<no model configured>'}")
+    if not profile.model:
+        _stderr("  note: no model is configured yet; the editor can set one")
     _stderr(f"  settings: {settings_path()}")
 
     stopping = threading.Event()
@@ -297,7 +300,8 @@ def _cmd_chat(args: argparse.Namespace) -> int:
 
     session.bus.subscribe(_Printer())
     _stderr(f"{PRODUCT_NAME} {__version__} - {session.workspace}")
-    _stderr(f"profile {session.profile().id} -> {session.profile().model}")
+    profile = session.described_profile()
+    _stderr(f"profile {profile.id} -> {profile.model or '<no model configured>'}")
     _stderr("type a task, /exit to quit, /reset to clear the conversation")
 
     try:

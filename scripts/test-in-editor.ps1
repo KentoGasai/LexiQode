@@ -18,22 +18,31 @@
 param(
     [ValidateSet('codium', 'code')]
     [string]$Editor = 'codium',
-    [switch]$KeepProfile
+    [switch]$KeepProfile,
+    # Which in-editor runner to use: the verification, or the capability probe.
+    [string]$Runner = 'test\vscode\run.js',
+    # Verify a built shell instead of a development host. The shell already
+    # carries the extension, so --extensionDevelopmentPath must not be passed:
+    # it would load a second copy from source.
+    [switch]$Builtin,
+    [string]$Exe
 )
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 $extension = Join-Path $repo 'extension'
-$runner = Join-Path $extension 'test\vscode\run.js'
+$runner = Join-Path $extension $Runner
 
 if (-not (Test-Path $runner)) { throw "the in-editor runner is missing at $runner" }
 if (-not (Test-Path (Join-Path $extension 'out\extension.js'))) {
     throw 'compile the extension first: npm run compile'
 }
 
-$exe = switch ($Editor) {
-    'codium' { Join-Path $env:LOCALAPPDATA 'Programs\VSCodium\VSCodium.exe' }
-    'code' { Join-Path $env:LOCALAPPDATA 'Programs\Microsoft VS Code\Code.exe' }
+if (-not $Exe) {
+    $Exe = switch ($Editor) {
+        'codium' { Join-Path $env:LOCALAPPDATA 'Programs\VSCodium\VSCodium.exe' }
+        'code' { Join-Path $env:LOCALAPPDATA 'Programs\Microsoft VS Code\Code.exe' }
+    }
 }
 if (-not (Test-Path $exe)) { throw "$Editor is not installed at $exe" }
 
@@ -74,8 +83,11 @@ $env:LEXIQODE_RUNTIME_FILE = Join-Path $configDir 'core-runtime.json'
 Write-Host "running the extension inside $Editor..."
 Write-Host "  profile: $profileRoot"
 
-$arguments = @(
-    "--extensionDevelopmentPath=$extension",
+$arguments = @()
+if (-not $Builtin) {
+    $arguments += "--extensionDevelopmentPath=$extension"
+}
+$arguments += @(
     "--extensionTestsPath=$runner",
     "--user-data-dir=$userData",
     "--extensions-dir=$extensionsDir",
