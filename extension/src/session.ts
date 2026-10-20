@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { CoreClient, ConnectionState } from './core/client';
 import { Logger } from './core/logger';
-import { CoreFrame, Handshake, ToolEndEvent, ToolStartEvent } from './core/types';
+import { AgentModeInfo, CoreFrame, Handshake, ToolEndEvent, ToolStartEvent } from './core/types';
 import {
   agentPatch,
   coreEnvironment,
@@ -196,12 +196,40 @@ export class Session implements vscode.Disposable {
 
   // ------------------------------------------------------------------ actions
 
-  async send(text: string): Promise<void> {
+  async send(text: string, mode?: string): Promise<void> {
     const client = await this.ensureClient();
     if (!client) {
       throw new Error('the core is not running');
     }
-    await client.startTurn(text);
+    const chosen = mode || this.lastMode;
+    const started = await client.startTurn(text, { mode: chosen });
+    if (started?.mode) {
+      this.lastMode = started.mode;
+    }
+  }
+
+  /** The mode a turn uses when the caller does not name one. */
+  private lastMode = 'agent';
+
+  get mode(): string {
+    return this.lastMode;
+  }
+
+  /**
+   * The mode catalogue, read from the core so the menu and the enforcement
+   * cannot disagree: the core is the only thing that decides what a mode allows.
+   */
+  async modes(): Promise<AgentModeInfo[]> {
+    const client = this.client;
+    if (!client || client.connectionState !== 'ready') {
+      return [];
+    }
+    try {
+      return (await client.getState()).modes ?? [];
+    } catch (error) {
+      this.log.warn(`could not read the mode list: ${error instanceof Error ? error.message : error}`);
+      return [];
+    }
   }
 
   async cancel(): Promise<void> {

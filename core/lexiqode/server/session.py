@@ -22,6 +22,7 @@ from typing import Any, Callable
 
 from ..agent.events import EventBus
 from ..agent.loop import AgentLoop, LoopResult
+from ..agent.modes import MODES, AgentMode, catalogue, get_mode
 from ..agent.tools.base import ApprovalDecision, ApprovalRequest
 from ..agent.tools.registry import ToolRegistry, default_registry
 from ..config import ModelProfile, Settings, sessions_dir
@@ -86,6 +87,7 @@ class TurnState:
     running: bool = False
     started_at: float = 0.0
     message: str = ""
+    mode: str = ""
     result: LoopResult | None = None
     error: str = ""
 
@@ -178,28 +180,46 @@ class CoreSession:
                 self._loop.close()
             self._loop = None
 
-    def start_turn(self, message: str, *, tools: bool = True) -> dict[str, Any]:
+    def start_turn(
+        self, message: str, *, tools: bool = True, mode: str | None = None
+    ) -> dict[str, Any]:
         """Run a turn on a worker thread; events flow through the bus.
 
         With ``tools=False`` the model answers without any tool schemas, which is
         what an inline edit needs: one piece of text to insert, not a plan.
+
+        ``mode`` selects what the agent may do. An unknown id raises
+        :class:`UnknownMode`, which the HTTP layer reports as a 400.
         """
 
         text = (message or "").strip()
         if not text:
             raise ConfigError("the message is empty")
+        # Validate the input before the state: a caller who sent a bad mode should
+        # learn that, whether or not a turn happens to be running.
+        resolved = get_mode(mode)
         if self._turn.running:
             raise ConfigError("a turn is already running in this workspace")
 
-        self._turn = TurnState(running=True, started_at=time.time(), message=text)
-        self._thread = threading.Thread(target=self._run_turn, args=(text, tools), daemon=True)
+        self._turn = TurnState(
+            running=True, started_at=time.time(), message=text, mode=resolved.id
+        )
+        self._thread = threading.Thread(
+            target=self._run_turn, args=(text, tools, resolved), daemon=True
+        )
         self._thread.start()
-        return {"started": True, "message": text, "tools": bool(tools)}
+        return {
+            "started": True,
+            "message": text,
+            "tools": bool(tools),
+            "mode": resolved.id,
+            "mode_tools": None if resolved.tools is None else list(resolved.tools),
+        }
 
-    def _run_turn(self, text: str, tools: bool) -> None:
+    def _run_turn(self, text: str, tools: bool, mode: AgentMode) -> None:
         try:
             loop = self.loop()
-            result = loop.run(text, tools=tools)
+            result = loop.run(text, tools=tools, mode=mode)
             self._turn.result = result
             save_history(self._workspace, loop.messages)
         except Exception as exc:  # reported to the client verbatim
@@ -314,9 +334,11 @@ class CoreSession:
                 "command_timeout": self.settings.agent.command_timeout,
             },
             "tools": self.registry.describe(),
+            "modes": catalogue(),
             "turn": {
                 "running": turn.running,
                 "message": turn.message,
+                "mode": turn.mode or MODES[0].id,
                 "elapsed_ms": int((time.time() - turn.started_at) * 1000) if turn.running else 0,
                 "last_error": turn.error,
                 "last_stopped": turn.result.stopped if turn.result else "",

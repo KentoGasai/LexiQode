@@ -18,6 +18,7 @@ from ..errors import ProviderError
 from ..llm.openai import OpenAIChatClient
 from ..llm.types import StreamAccumulator, ToolCall, Usage, tool_message, user_message
 from .events import EventEmitter
+from .modes import AgentMode, get_mode
 from .prompts import build_system_prompt
 from .tools.base import ApprovalDecision, ApprovalRequest, ToolContext
 from .tools.registry import ToolRegistry
@@ -65,7 +66,11 @@ class AgentLoop:
         self._client = client or OpenAIChatClient(profile)
         self._owns_client = client is None
         self._history: list[dict[str, Any]] = list(history or [])
-        self._system = build_system_prompt(self.workspace, registry, extra_rules=extra_rules)
+        self._extra_rules = extra_rules
+        # The prompt names the mode and its tools, so it is built per mode and
+        # remembered: the workspace snapshot inside it costs a git call.
+        self._system_cache: dict[str, str] = {}
+        self._mode: AgentMode = get_mode(None)
         self._cancel = threading.Event()
         self._max_history = max(10, max_history_messages)
         # Whether the current turn may call tools. Inline edits turn this off so
@@ -92,20 +97,31 @@ class AgentLoop:
         return json.dumps(self._history, ensure_ascii=False)
 
     # ------------------------------------------------------------------ the loop
-    def run(self, user_text: str, *, tools: bool = True) -> LoopResult:
+    def run(self, user_text: str, *, tools: bool = True, mode: AgentMode | None = None) -> LoopResult:
         self._cancel.clear()
-        self._tools_enabled = bool(tools) and self.profile.supports_tools
+        self._mode = mode or get_mode(None)
+        self._tools_enabled = bool(tools) and self.profile.supports_tools and self._mode.tools != ()
         self._history.append(user_message(user_text))
-        self._emit("turn_start", {"model": self.profile.model, "profile": self.profile.id})
+        self._emit(
+            "turn_start",
+            {"model": self.profile.model, "profile": self.profile.id, "mode": self._mode.id},
+        )
+
+        # A mode may ask for a smaller budget than the configured maximum; it may
+        # never raise it, because that ceiling is the user's.
+        budget = self.settings.max_steps
+        if self._mode.steps:
+            budget = min(budget, self._mode.steps)
+        budget = max(1, budget)
 
         result = LoopResult()
         try:
-            for step in range(1, max(1, self.settings.max_steps) + 1):
+            for step in range(1, budget + 1):
                 if self._cancel.is_set():
                     result.stopped = "cancelled"
                     break
                 result.steps = step
-                self._emit("step_start", {"step": step, "max_steps": self.settings.max_steps})
+                self._emit("step_start", {"step": step, "max_steps": budget})
 
                 accumulator = self._stream_once()
                 self._accumulate_usage(result.usage, accumulator.usage)
@@ -172,8 +188,8 @@ class AgentLoop:
         """One completion, published as events while it streams."""
 
         accumulator = StreamAccumulator()
-        payload = [{"role": "system", "content": self._system}, *self._history]
-        tool_schemas = self.registry.schemas() if self._tools_enabled else None
+        payload = [{"role": "system", "content": self._system_for(self._mode)}, *self._history]
+        tool_schemas = self.registry.schemas(self._mode.tools) if self._tools_enabled else None
 
         for chunk in self._client.stream(payload, tool_schemas):
             if self._cancel.is_set():
@@ -209,7 +225,7 @@ class AgentLoop:
             emit=self._emit,
             approve=self._approve,
         )
-        result = self.registry.execute(call.name, arguments, context)
+        result = self.registry.execute(call.name, arguments, context, self._mode.tools)
 
         content = result.content
         budget = self.settings.max_tool_output
@@ -235,6 +251,15 @@ class AgentLoop:
             if message.get("role") == "assistant" and message.get("content"):
                 return str(message["content"])
         return ""
+
+    def _system_for(self, mode: AgentMode) -> str:
+        cached = self._system_cache.get(mode.id)
+        if cached is None:
+            cached = build_system_prompt(
+                self.workspace, self.registry, extra_rules=self._extra_rules, mode=mode
+            )
+            self._system_cache[mode.id] = cached
+        return cached
 
     def _trim(self) -> None:
         """Keep the newest messages, never splitting a tool call from its result."""

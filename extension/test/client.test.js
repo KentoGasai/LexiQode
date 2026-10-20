@@ -184,6 +184,56 @@ describe('CoreClient against a real core', () => {
     assert.strictEqual(caught.status, 502, `an unreachable endpoint is a bad gateway, got ${caught.status}`);
   });
 
+  it('reports the mode catalogue the panel renders', async () => {
+    const state = await primary.client.getState();
+    const ids = state.modes.map((mode) => mode.id);
+    for (const expected of ['agent', 'ask', 'plan', 'debug', 'review']) {
+      assert.ok(ids.includes(expected), `${expected} must be offered: got ${ids.join(', ')}`);
+    }
+    const ask = state.modes.find((mode) => mode.id === 'ask');
+    assert.strictEqual(ask.can_write, false, 'Ask must be advertised as read-only');
+    assert.deepStrictEqual(
+      [...ask.tools].sort(),
+      ['glob', 'grep', 'list_dir', 'read_file'],
+      'the advertised tools must be the ones the core enforces'
+    );
+    const agent = state.modes.find((mode) => mode.id === 'agent');
+    assert.strictEqual(agent.tools, null, 'Agent places no restriction');
+    assert.strictEqual(agent.can_write, true);
+    assert.strictEqual(state.turn.mode, 'agent', 'an idle session reports the default mode');
+  });
+
+  it('starts a turn in a named mode and remembers it', async () => {
+    const started = await primary.client.startTurn('summarise the workspace', { mode: 'plan' });
+    assert.strictEqual(started.mode, 'plan');
+
+    const during = await primary.client.getState();
+    assert.strictEqual(during.turn.mode, 'plan');
+
+    // A turn may not outlive the test, or the next one is refused because the
+    // workspace is still busy.
+    await waitFor(async () => {
+      const state = await primary.client.getState();
+      return state.turn.running ? undefined : state;
+    }, 'the plan turn to finish');
+
+    const after = await primary.client.getState();
+    assert.strictEqual(after.turn.mode, 'plan', 'the mode survives the turn');
+  });
+
+  it('refuses an unknown mode with the valid ones', async () => {
+    let caught;
+    try {
+      await primary.client.startTurn('hello', { mode: 'telepathy' });
+    } catch (error) {
+      caught = error;
+    }
+    assert.ok(caught instanceof CoreRequestError, 'an unknown mode must be a typed error');
+    assert.strictEqual(caught.status, 400);
+    assert.match(caught.message, /unknown mode/);
+    assert.match(caught.message, /agent/, 'the error must name what is accepted');
+  });
+
   it('rejects a wrong token', async () => {
     const { client } = makeClient({ attachToRunningCore: false });
     // Point the clone at the running core but with a broken token.

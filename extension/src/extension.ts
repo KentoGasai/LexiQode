@@ -17,7 +17,17 @@ import { runSetup } from './features/setup';
 export function activate(context: vscode.ExtensionContext): void {
   const log = new Logger();
   const session = new Session(log, context.secrets);
-  const panel = new ChatViewProvider(context.extensionUri, session, log);
+  const panel = new ChatViewProvider(context.extensionUri, session, log, context.secrets);
+
+  // Opening the project should show the agent, not an empty editor with an icon
+  // the user has to discover. This runs once per project, so it never fights a
+  // layout the user has chosen afterwards.
+  const WELCOMED = 'lexiqode.welcomed';
+  if (vscode.workspace.workspaceFolders?.length && !context.workspaceState.get<boolean>(WELCOMED)) {
+    void context.workspaceState.update(WELCOMED, true).then(() =>
+      vscode.commands.executeCommand('workbench.view.extension.lexiqode')
+    );
+  }
 
   // The core lives in a folder the workspace does not always contain: opening
   // your own project somewhere else means nothing points at it. Rather than

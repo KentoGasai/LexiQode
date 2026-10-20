@@ -296,6 +296,58 @@ class CompleteTest(ServerTestCase):
         self.assertEqual(self.seen_profiles[0].model, "test-model")
 
 
+class ModeTest(ServerTestCase):
+    script = [text_chunks("just words")]
+
+    def test_the_catalogue_is_reported_to_the_editor(self) -> None:
+        state = self.get("/api/state").json()
+        ids = [entry["id"] for entry in state["modes"]]
+        self.assertIn("agent", ids)
+        self.assertIn("plan", ids)
+        self.assertEqual(state["turn"]["mode"], "agent", "an idle session reports the default mode")
+        plan = next(entry for entry in state["modes"] if entry["id"] == "plan")
+        self.assertFalse(plan["can_write"])
+
+    def test_a_turn_can_choose_a_mode(self) -> None:
+        response = self.post("/api/chat", {"message": "explain this", "mode": "ask"})
+        self.assertEqual(response.status_code, 202)
+        body = response.json()
+        self.assertEqual(body["mode"], "ask")
+        self.assertEqual(
+            set(body["mode_tools"]), {"read_file", "list_dir", "glob", "grep"}
+        )
+
+        self.wait_for_turn()
+        offered = {schema["function"]["name"] for schema in self.client.calls[0]["tools"]}
+        self.assertEqual(
+            offered,
+            {"read_file", "list_dir", "glob", "grep"},
+            "a read-only mode must not offer write or command tools",
+        )
+        system = self.client.calls[0]["messages"][0]["content"]
+        self.assertIn("Current mode: Ask", system)
+
+    def test_the_mode_is_remembered_after_the_turn(self) -> None:
+        self.post("/api/chat", {"message": "plan it", "mode": "plan"})
+        self.wait_for_turn()
+        self.assertEqual(self.get("/api/state").json()["turn"]["mode"], "plan")
+
+    def test_an_unknown_mode_is_rejected_with_the_valid_ones(self) -> None:
+        response = self.post("/api/chat", {"message": "hello", "mode": "telepathy"})
+        self.assertEqual(response.status_code, 400)
+        message = response.json()["error"]
+        self.assertIn("unknown mode", message)
+        self.assertIn("agent", message, "the error must say what is accepted")
+        self.assertFalse(self.get("/api/state").json()["turn"]["running"])
+
+    def test_a_narrowed_mode_still_reaches_the_model(self) -> None:
+        self.post("/api/chat", {"message": "review it", "mode": "review"})
+        self.assertTrue(self.wait_for_turn())
+        turn = self.get("/api/state").json()["turn"]
+        self.assertEqual(turn["mode"], "review")
+        self.assertEqual(turn["last_stopped"], "completed")
+
+
 class ProviderFailureTest(ServerTestCase):
     """A failing endpoint must become an answer, never a dropped connection."""
 

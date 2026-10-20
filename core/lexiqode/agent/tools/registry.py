@@ -41,10 +41,24 @@ class ToolRegistry:
         return self._tools.get(name)
 
     def active(self) -> list[Tool]:
-        return [tool for name, tool in sorted(self._tools.items()) if name not in self.disabled]
+        return self.active_for(None)
 
-    def schemas(self) -> list[dict[str, Any]]:
-        return [tool.schema() for tool in self.active()]
+    def active_for(self, allowed: Iterable[str] | None = None) -> list[Tool]:
+        """Tools that are enabled here and permitted by the current mode.
+
+        ``allowed=None`` means the mode places no restriction, which is not the
+        same as the empty tuple: an empty mode allows nothing.
+        """
+
+        permit = None if allowed is None else set(allowed)
+        return [
+            tool
+            for name, tool in sorted(self._tools.items())
+            if name not in self.disabled and (permit is None or name in permit)
+        ]
+
+    def schemas(self, allowed: Iterable[str] | None = None) -> list[dict[str, Any]]:
+        return [tool.schema() for tool in self.active_for(allowed)]
 
     def describe(self) -> list[dict[str, Any]]:
         """Metadata for the editor's tool list."""
@@ -59,12 +73,26 @@ class ToolRegistry:
             for tool in self.active()
         ]
 
-    def execute(self, name: str, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+    def execute(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        context: ToolContext,
+        allowed: Iterable[str] | None = None,
+    ) -> ToolResult:
         tool = self._tools.get(name)
         if tool is None:
             return ToolResult.failure(f"unknown tool {name!r}", error="unknown_tool")
         if name in self.disabled:
             return ToolResult.failure(f"tool {name!r} is disabled in this workspace", error="disabled")
+        if allowed is not None and name not in set(allowed):
+            # A guardrail, not a hint: if the model calls a tool this mode does not
+            # offer, the call fails and the model has to work within the mode.
+            return ToolResult.failure(
+                f"tool {name!r} is not available in this mode; use one of "
+                f"{', '.join(sorted(allowed)) or 'no tools'}",
+                error="not_available_in_mode",
+            )
         if not isinstance(arguments, dict):
             return ToolResult.failure("tool arguments must be a JSON object", error="bad_arguments")
         return tool.execute(arguments, context)

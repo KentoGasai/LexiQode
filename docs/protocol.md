@@ -70,14 +70,14 @@ with the core.
 | method | path | auth | body | returns |
 |---|---|---|---|---|
 | GET | `/api/health` | no | - | liveness and identity |
-| GET | `/api/state` | yes | - | workspace, profile, agent settings, tools, turn |
+| GET | `/api/state` | yes | - | workspace, profile, agent settings, tools, modes, turn |
 | GET | `/api/settings` | yes | - | redacted settings with resolved paths |
 | GET | `/api/tools` | yes | - | tool names, families, enabled flags |
 | GET | `/api/history` | yes | - | the conversation messages |
 | GET | `/api/ping` | yes | - | `{"ok":true,"pong":true}` |
 | GET | `/api/events` | yes | - | SSE stream (section 6) |
 | PUT | `/api/settings` | yes | patch | updated redacted settings |
-| POST | `/api/chat` | yes | `{"message": "...", "tools"?: bool}` | `202` once the turn started |
+| POST | `/api/chat` | yes | `{"message": "...", "mode"?: "agent", "tools"?: bool}` | `202` once the turn started |
 | POST | `/api/cancel` | yes | - | cancels the turn and pending approvals |
 | POST | `/api/reset` | yes | - | clears the conversation |
 | POST | `/api/approval` | yes | `{"id","approved","remember","reason"}` | `{"delivered": bool}` |
@@ -98,6 +98,41 @@ at a time, and a second `POST /api/chat` while one is running is rejected with
 `tools: false` runs that turn without offering any tool schema to the model. It
 exists for requests whose answer is a piece of text rather than a plan. The flag
 applies to one turn only and defaults to `true`.
+
+### Modes
+
+`mode` names what the agent may do during that turn. The core owns the list and
+publishes it in `GET /api/state` under `modes`, so the editor's menu cannot drift
+from what is enforced:
+
+```json
+{
+  "id": "ask",
+  "label": "Ask",
+  "summary": "Answer questions about the code. Nothing is changed.",
+  "tools": ["read_file", "list_dir", "glob", "grep"],
+  "steps": 12,
+  "can_write": false
+}
+```
+
+| id | may do | may not do |
+|---|---|---|
+| `agent` | everything: read, write, run commands | - |
+| `ask` | read files, list, glob, grep | write, run anything |
+| `plan` | the same reads, and produce a plan | write, run anything |
+| `debug` | the same reads, plus `run_command` to reproduce | write |
+| `review` | the same reads, to critique the current diff | write, run anything |
+
+`tools: null` means the mode places no restriction. The narrowing is enforcement,
+not advice: a tool the mode excludes is left out of the request **and** refused by
+the registry with `error: "not_available_in_mode"` if the model calls it anyway.
+`steps` is a ceiling for that mode; the configured `agent.max_steps` still wins
+when it is lower.
+
+The chosen mode applies to one turn. `/api/state` reports the mode of the last
+turn (or started one) in `turn.mode`. An unknown id is rejected with `400` and a
+message naming the accepted values.
 
 `/api/complete` is a third kind of request: a one-shot completion that is **not**
 a turn. It does not touch the conversation, it cannot call a tool, and it uses
@@ -142,7 +177,7 @@ data: {"protocol":1}
 
 | event | payload | meaning |
 |---|---|---|
-| `turn_start` | `model`, `profile` | a turn began |
+| `turn_start` | `model`, `profile`, `mode` | a turn began |
 | `step_start` | `step`, `max_steps` | a model round trip began |
 | `text_delta` | `text` | append to the assistant answer |
 | `reasoning_delta` | `text` | scratchpad text; show separately, never as the answer |

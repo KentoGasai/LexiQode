@@ -518,8 +518,23 @@ export class CoreClient {
     return payload.tools ?? [];
   }
 
-  async startTurn(message: string): Promise<void> {
-    await this.request('POST', '/api/chat', { message });
+  /**
+   * Start a turn.
+   *
+   * `mode` selects what the agent may do; the core refuses an unknown id with a
+   * 400 naming the valid ones. `tools: false` answers without offering any tool
+   * schema at all, which an inline edit needs.
+   */
+  async startTurn(
+    message: string,
+    options: { mode?: string; tools?: boolean } = {}
+  ): Promise<{ mode: string }> {
+    const payload = await this.request<{ mode: string }>('POST', '/api/chat', {
+      message,
+      ...(options.mode ? { mode: options.mode } : {}),
+      ...(options.tools === undefined ? {} : { tools: options.tools }),
+    });
+    return payload;
   }
 
   async cancel(): Promise<void> {

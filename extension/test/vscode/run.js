@@ -39,9 +39,12 @@ function runtimeDescriptorPath() {
   return path.join(process.env.LEXIQODE_CONFIG_DIR ?? '', 'core-runtime.json');
 }
 
-function getJson(url) {
+function getJson(url, token) {
   return new Promise((resolve, reject) => {
-    const request = http.get(url, (response) => {
+    const request = http.get(
+      url,
+      token ? { headers: { Authorization: `Bearer ${token}` } } : {},
+      (response) => {
       const chunks = [];
       response.on('data', (chunk) => chunks.push(chunk));
       response.on('end', () => {
@@ -51,7 +54,8 @@ function getJson(url) {
           reject(error);
         }
       });
-    });
+      }
+    );
     request.on('error', reject);
     request.setTimeout(5000, () => request.destroy(new Error('timeout')));
   });
@@ -141,7 +145,19 @@ async function run() {
   assert.strictEqual(unauthorised, 401, `an unauthenticated call must be refused, got ${unauthorised}`);
   step('unauthenticated request refused', '401');
 
-  // 7. The agent view can be revealed without the editor reporting a failure.
+  // 7. The mode catalogue the panel renders comes from the core, so the menu and
+  //    the enforcement cannot drift apart.
+  const state = await getJson(`${live.base_url}/api/state`, live.token);
+  const modeIds = (state.modes || []).map((mode) => mode.id);
+  for (const expected of ['agent', 'ask', 'plan']) {
+    assert.ok(modeIds.includes(expected), `the core must offer the ${expected} mode, got ${modeIds.join(', ')}`);
+  }
+  const readOnly = state.modes.filter((mode) => !mode.can_write).map((mode) => mode.id);
+  assert.ok(readOnly.includes('ask'), 'Ask must be advertised as read-only');
+  assert.strictEqual(state.turn.mode, 'agent', 'an idle session reports the default mode');
+  step('mode catalogue', `${modeIds.length} modes, read-only: ${readOnly.join(', ')}`);
+
+  // 8. The agent view can be revealed without the editor reporting a failure.
   await vscode.commands.executeCommand('workbench.view.extension.lexiqode');
   await new Promise((resolve) => setTimeout(resolve, 2000));
   step('agent view revealed');

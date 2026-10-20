@@ -29,14 +29,24 @@ feature matrix we work from - lives in `docs/cursor/`.
 
 | part | state |
 |---|---|
-| `core/` agent runtime | **working**, 116 tests plus a 24-check end-to-end smoke test |
-| `docs/protocol.md` contract | **frozen** at protocol 1 |
-| `extension/` VSCodium glue | **working**, verified inside a real VSCodium |
-| `vscodium/` fork and branding | not started |
+| `core/` agent runtime | **working**, 136 tests plus a 24-check end-to-end smoke test |
+| `docs/protocol.md` contract | **frozen** at protocol 1, extended additively |
+| `extension/` VSCodium glue | **working**: agent panel, modes, in-panel settings, approvals, diffs, inline edit |
+| `vscodium/` branded build | not started - the cross-cutting work |
 
-The extension side is finished for the first slice: agent panel, approval flow,
-diff review and inline edit. What remains is the branded shell and the deeper
-Cursor-style surfaces (tab completion, project indexing); both are additive.
+### What is and is not "native" yet
+
+Honest boundary, because it decides the next step:
+
+* the chat, its mode row and its settings live in a **webview view** contributed by
+  the extension. It looks and behaves like part of the editor, and the panel opens
+  itself the first time a project is opened, but it is still an extension surface:
+  it can be uninstalled, and it cannot draw outside a view.
+* the deeper Cursor surfaces - completion inside the editor, a rewritten layout, a
+  chat drawn by the workbench itself - need the **branded build**: VSCodium
+  compiled from source with our patches, the extension preinstalled, and our
+  `product.json`. Until that exists, "native" means "opens by itself and looks at
+  home", not "is compiled into the shell".
 
 ## Quick start
 
@@ -101,6 +111,8 @@ Inside the editor:
 | action | how |
 |---|---|
 | ask for a change | type in the panel; the agent edits files and runs tests |
+| choose what the agent may do | the mode row at the top of the panel: Agent, Ask, Plan, Debug, Review |
+| change endpoint, model, key, approvals | the gear in the panel header |
 | approve a risky step | inline card in the panel, or a modal dialog when it is collapsed |
 | review a file change | the diff opens automatically; the panel keeps a "review change" link |
 | rewrite a selection | select code, then `Ctrl+Alt+K` |

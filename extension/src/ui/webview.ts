@@ -30,8 +30,10 @@ export function renderChatHtml(webview: vscode.Webview, extensionUri: vscode.Uri
     <span class="dot" id="dot"></span>
     <span class="model" id="model">starting the core...</span>
     <span class="spacer"></span>
+    <button class="icon" id="settings" title="Agent settings">&#9881;</button>
     <button class="icon" id="newSession" title="New session">&#8635;</button>
   </header>
+  <nav class="modes" id="modes" title="What the agent is allowed to do"></nav>
 
   <main class="log" id="log">
     <div class="empty" id="empty">
@@ -39,6 +41,36 @@ export function renderChatHtml(webview: vscode.Webview, extensionUri: vscode.Uri
       <p class="empty-hint">It reads the workspace, edits files and runs your tests. Writes and shell commands ask you first.</p>
     </div>
   </main>
+
+  <section class="sheet" id="sheet" hidden>
+    <div class="sheet-head">
+      <strong>Agent settings</strong>
+      <span class="spacer"></span>
+      <button class="icon" id="sheetClose" title="Close">&#10005;</button>
+    </div>
+    <label class="field">Endpoint
+      <input type="text" id="cfgBaseUrl" placeholder="https://gateway.example.com/v1" spellcheck="false">
+    </label>
+    <label class="field">Model
+      <input type="text" id="cfgModel" placeholder="your-model-id" spellcheck="false">
+    </label>
+    <label class="field">API key <span class="hint" id="cfgKeyHint"></span>
+      <input type="password" id="cfgApiKey" placeholder="leave empty to keep the stored key">
+    </label>
+    <label class="field">Maximum steps per turn
+      <input type="number" id="cfgMaxSteps" min="1" max="200" step="1">
+    </label>
+    <div class="sheet-row">
+      <label class="toggle"><input type="checkbox" id="cfgAskWrites"> ask before file changes</label>
+      <label class="toggle"><input type="checkbox" id="cfgAskCommands"> ask before commands</label>
+    </div>
+    <div class="sheet-row">
+      <button class="primary" id="cfgSave">Save</button>
+      <button class="ghost" id="cfgCancel">Cancel</button>
+      <span class="spacer"></span>
+      <span class="notice" id="cfgStatus"></span>
+    </div>
+  </section>
 
   <footer class="composer">
     <div class="approvals" id="approvals"></div>
@@ -187,6 +219,50 @@ button:disabled { opacity: .5; cursor: default; }
 .toggle { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; opacity: .85; cursor: pointer; }
 .notice { font-size: 11px; color: var(--vscode-descriptionForeground); padding: 2px 0; }
 .notice.error { color: var(--vscode-errorForeground, #d94a4a); }
+
+/* Mode switcher: the row that answers "what is the agent allowed to do". */
+.modes {
+  display: flex; gap: 2px; padding: 4px 6px; flex: 0 0 auto; flex-wrap: wrap;
+  border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,.35));
+}
+.modes button {
+  padding: 3px 8px; font-size: 11px; border-radius: 4px;
+  background: transparent; color: var(--vscode-foreground);
+  border: 1px solid transparent; opacity: .75;
+}
+.modes button:hover { opacity: 1; background: var(--vscode-toolbar-hoverBackground, rgba(128,128,128,.15)); }
+.modes button.active {
+  opacity: 1; font-weight: 600;
+  background: var(--vscode-button-background); color: var(--vscode-button-foreground);
+}
+/* The middot is written as a CSS escape, so the backslash has to be doubled
+   here: a single one would be read as an octal escape by the template literal. */
+.modes button.readonly::after { content: " \\00b7"; opacity: .6; }
+.mode-note {
+  font-size: 10px; opacity: .7; padding: 0 6px 4px;
+  flex: 0 0 auto;
+}
+
+/* Settings sheet: the agent's own settings, inside the agent. */
+.sheet {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 5;
+  background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background));
+  border-top: 1px solid var(--vscode-panel-border, rgba(128,128,128,.5));
+  box-shadow: 0 -6px 20px rgba(0,0,0,.25);
+  padding: 8px; display: flex; flex-direction: column; gap: 6px;
+  max-height: 88vh; overflow-y: auto;
+}
+.sheet-head { display: flex; align-items: center; gap: 6px; }
+.field { display: flex; flex-direction: column; gap: 2px; font-size: 11px; opacity: .95; }
+.field input {
+  padding: 4px 6px; font-size: 12px; font-family: inherit;
+  color: var(--vscode-input-foreground); background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, rgba(128,128,128,.4)); border-radius: 4px;
+}
+.field input:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+.field .hint { opacity: .7; font-size: 10px; }
+.sheet-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.app { position: relative; }
 `;
 
 /**
@@ -208,6 +284,23 @@ const SCRIPT = `
   var allowWrites = document.getElementById('allowWrites');
   var allowCommands = document.getElementById('allowCommands');
   var newSession = document.getElementById('newSession');
+  var modesBar = document.getElementById('modes');
+  var settingsButton = document.getElementById('settings');
+  var sheet = document.getElementById('sheet');
+  var sheetClose = document.getElementById('sheetClose');
+  var cfgBaseUrl = document.getElementById('cfgBaseUrl');
+  var cfgModel = document.getElementById('cfgModel');
+  var cfgApiKey = document.getElementById('cfgApiKey');
+  var cfgKeyHint = document.getElementById('cfgKeyHint');
+  var cfgMaxSteps = document.getElementById('cfgMaxSteps');
+  var cfgAskWrites = document.getElementById('cfgAskWrites');
+  var cfgAskCommands = document.getElementById('cfgAskCommands');
+  var cfgSave = document.getElementById('cfgSave');
+  var cfgCancel = document.getElementById('cfgCancel');
+  var cfgStatus = document.getElementById('cfgStatus');
+
+  var currentMode = 'agent';
+  var catalogue = [];
 
   var turn = null;
   var body = null;
@@ -406,7 +499,42 @@ const SCRIPT = `
     var text = input.value.trim();
     if (!text || busy) { return; }
     input.value = '';
-    api.postMessage({ type: 'send', text: text });
+    api.postMessage({ type: 'send', text: text, mode: currentMode });
+  }
+
+  function renderModes() {
+    modesBar.textContent = '';
+    for (var index = 0; index < catalogue.length; index += 1) {
+      var mode = catalogue[index];
+      var button = element('button', mode.id === currentMode ? 'active' : '', mode.label);
+      button.title = mode.summary + (mode.can_write ? '' : '  (read-only)');
+      if (!mode.can_write) { button.className += ' readonly'; }
+      /* A closure per button, so the id is captured rather than shared. */
+      button.addEventListener('click', (function (id) {
+        return function () {
+          currentMode = id;
+          renderModes();
+          api.postMessage({ type: 'setMode', mode: id });
+        };
+      })(mode.id));
+      modesBar.appendChild(button);
+    }
+  }
+
+  function showSheet(show, values) {
+    if (show && values) {
+      cfgBaseUrl.value = values.baseUrl || '';
+      cfgModel.value = values.model || '';
+      cfgApiKey.value = '';
+      cfgKeyHint.textContent = values.hasApiKey ? '(a key is stored; empty keeps it)' : '(no key stored)';
+      cfgMaxSteps.value = values.maxSteps || 40;
+      cfgAskWrites.checked = !!values.askWrites;
+      cfgAskCommands.checked = !!values.askCommands;
+      cfgStatus.textContent = '';
+      cfgStatus.className = 'notice';
+    }
+    sheet.hidden = !show;
+    if (show) { cfgBaseUrl.focus(); }
   }
 
   sendButton.addEventListener('click', submit);
@@ -428,6 +556,22 @@ const SCRIPT = `
   allowCommands.addEventListener('change', function () {
     api.postMessage({ type: 'policy', writes: allowWrites.checked, commands: allowCommands.checked });
   });
+  settingsButton.addEventListener('click', function () { api.postMessage({ type: 'loadSettings' }); });
+  sheetClose.addEventListener('click', function () { showSheet(false); });
+  cfgCancel.addEventListener('click', function () { showSheet(false); });
+  cfgSave.addEventListener('click', function () {
+    cfgStatus.textContent = 'saving...';
+    cfgStatus.className = 'notice';
+    api.postMessage({
+      type: 'saveSettings',
+      baseUrl: cfgBaseUrl.value.trim(),
+      model: cfgModel.value.trim(),
+      apiKey: cfgApiKey.value,
+      maxSteps: parseInt(cfgMaxSteps.value, 10) || 40,
+      askWrites: cfgAskWrites.checked,
+      askCommands: cfgAskCommands.checked
+    });
+  });
   input.addEventListener('keydown', function (event) {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
@@ -444,8 +588,24 @@ const SCRIPT = `
       modelLabel.textContent = message.model || 'not connected';
       allowWrites.checked = !!message.allowWrites;
       allowCommands.checked = !!message.allowCommands;
+      catalogue = message.modes || [];
+      if (message.mode) { currentMode = message.mode; }
+      renderModes();
       renderHistory(message.history);
       if (message.notice) { notice(message.notice, message.connection === 'error'); }
+    } else if (message.type === 'settings') {
+      showSheet(true, message.values || {});
+    } else if (message.type === 'settingsSaved') {
+      if (message.ok) {
+        showSheet(false);
+        notice('Settings saved.');
+      } else {
+        cfgStatus.textContent = message.error || 'could not save';
+        cfgStatus.className = 'notice error';
+      }
+    } else if (message.type === 'mode') {
+      currentMode = message.mode || currentMode;
+      renderModes();
     } else if (message.type === 'connection') {
       dot.className = 'dot ' + (message.state === 'ready' ? 'ready' : (message.state === 'error' ? 'error' : 'busy'));
       if (message.model) { modelLabel.textContent = message.model; }

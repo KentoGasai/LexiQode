@@ -8,9 +8,13 @@ rather than testing boundaries.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .context import workspace_snapshot
 from .tools.registry import ToolRegistry
+
+if TYPE_CHECKING:
+    from .modes import AgentMode
 
 BASE_PROMPT = """You are LexiQode, a coding agent working directly in the user's workspace.
 
@@ -44,12 +48,25 @@ def build_system_prompt(
     registry: ToolRegistry,
     *,
     extra_rules: str = "",
+    mode: AgentMode | None = None,
 ) -> str:
     """Compose the system message: rules, environment, tools, project rules."""
 
     snapshot = workspace_snapshot(workspace)
     git = snapshot.get("git") or {}
-    lines = [BASE_PROMPT, "", "Environment:"]
+    lines = [BASE_PROMPT]
+
+    if mode is not None:
+        lines += ["", f"Current mode: {mode.label} - {mode.summary}"]
+        if mode.instructions.strip():
+            lines.append(mode.instructions.strip())
+        if not mode.can_write:
+            lines.append(
+                "In this mode you cannot change files. Describe what you would change "
+                "instead of attempting it."
+            )
+
+    lines += ["", "Environment:"]
     lines.append(f"- Workspace root: {snapshot.get('path')}")
     if isinstance(git, dict) and git.get("is_repo"):
         branch = git.get("branch") or "detached"
@@ -64,8 +81,12 @@ def build_system_prompt(
         lines.append("- Top level: " + ", ".join(str(item) for item in entries))
 
     lines += ["", "Available tools:"]
-    for tool in registry.active():
+    allowed = None if mode is None else mode.tools
+    available = registry.active_for(allowed)
+    for tool in available:
         lines.append(f"- {tool.name}: {tool.description}")
+    if not available:
+        lines.append("- none: this mode offers no tools")
 
     if extra_rules.strip():
         lines += ["", "Project rules (from the workspace, follow these):", extra_rules.strip()]

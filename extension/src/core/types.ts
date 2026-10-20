@@ -77,9 +77,21 @@ export interface ToolInfo {
 export interface TurnState {
   running: boolean;
   message: string;
+  mode: string;
   elapsed_ms: number;
   last_error: string;
   last_stopped: string;
+}
+
+/** One selectable behaviour, described by the core so the editor cannot drift. */
+export interface AgentModeInfo {
+  id: string;
+  label: string;
+  summary: string;
+  /** Allowed tool names, or null when the mode places no restriction. */
+  tools: string[] | null;
+  steps: number | null;
+  can_write: boolean;
 }
 
 export interface CoreState {
@@ -88,6 +100,7 @@ export interface CoreState {
   profile: ModelProfile;
   agent: AgentSettings;
   tools: ToolInfo[];
+  modes: AgentModeInfo[];
   turn: TurnState;
   pending_approvals: string[];
   history_length: number;

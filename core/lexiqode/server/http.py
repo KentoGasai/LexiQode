@@ -296,9 +296,11 @@ class _RequestHandler(BaseHTTPRequestHandler):
         try:
             body = self._read_json()
             if path == "/api/chat":
+                requested_mode = body.get("mode")
                 result = session.start_turn(
                     str(body.get("message") or ""),
                     tools=bool(body.get("tools", True)),
+                    mode=str(requested_mode) if requested_mode is not None else None,
                 )
                 self._send(HTTPStatus.ACCEPTED, {"ok": True, **result})
             elif path == "/api/cancel":
