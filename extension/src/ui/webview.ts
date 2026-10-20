@@ -606,6 +606,12 @@ const SCRIPT = `
     } else if (message.type === 'mode') {
       currentMode = message.mode || currentMode;
       renderModes();
+    } else if (message.type === 'modes') {
+      // A late catalogue, sent once the core is up. It must not overwrite the
+      // header, which is why it is not another "init".
+      catalogue = message.modes || catalogue;
+      if (message.mode) { currentMode = message.mode; }
+      renderModes();
     } else if (message.type === 'connection') {
       dot.className = 'dot ' + (message.state === 'ready' ? 'ready' : (message.state === 'error' ? 'error' : 'busy'));
       if (message.model) { modelLabel.textContent = message.model; }

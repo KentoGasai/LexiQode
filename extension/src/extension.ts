@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
 import { Logger } from './core/logger';
+import { ChatController } from './ui/chatController';
+import { ChatEditorPanel } from './ui/editorChat';
 import { ChatViewProvider } from './ui/panel';
 import { Session } from './session';
 import { isCoreRoot, setApiKey } from './config';
@@ -17,7 +19,10 @@ import { runSetup } from './features/setup';
 export function activate(context: vscode.ExtensionContext): void {
   const log = new Logger();
   const session = new Session(log, context.secrets);
-  const panel = new ChatViewProvider(context.extensionUri, session, log, context.secrets);
+  // One controller, two places to draw it: the side bar and an editor tab share
+  // the same conversation instead of keeping two transcripts.
+  const chat = new ChatController(session, log, context.secrets);
+  const panel = new ChatViewProvider(context.extensionUri, chat);
 
   // The chat lives in the secondary side bar, the way other agents do it, so
   // opening a project should bring that side bar up rather than leave the user
@@ -36,6 +41,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     log,
     session,
+    chat,
     panel,
 
     vscode.window.registerWebviewViewProvider(ChatViewProvider.viewType, panel, {
@@ -45,9 +51,14 @@ export function activate(context: vscode.ExtensionContext): void {
 
     vscode.commands.registerCommand('lexiqode.openChat', () => panel.reveal()),
 
+    // The tab form, for a session that needs the transcript beside the code.
+    vscode.commands.registerCommand('lexiqode.openChatInEditor', () =>
+      ChatEditorPanel.show(context.extensionUri, chat)
+    ),
+
     vscode.commands.registerCommand('lexiqode.newSession', async () => {
       await session.reset();
-      panel.postNotice('New session started.');
+      chat.postNotice('New session started.');
     }),
 
     vscode.commands.registerCommand('lexiqode.cancelTurn', async () => {
@@ -55,17 +66,17 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
 
     vscode.commands.registerCommand('lexiqode.restartCore', async () => {
-      panel.postNotice('Restarting the core...');
+      chat.postNotice('Restarting the core...');
       await session.restart();
       const state = session.currentState;
-      panel.postNotice(
+      chat.postNotice(
         state.connection === 'ready' ? 'Core is ready.' : `Core did not start: ${state.detail ?? 'unknown reason'}`,
         state.connection !== 'ready'
       );
     }),
 
     vscode.commands.registerCommand('lexiqode.setApiKey', () =>
-      promptForApiKey(context, session, log, panel)
+      promptForApiKey(context, session, log, chat)
     ),
 
     vscode.commands.registerCommand('lexiqode.setup', () =>
@@ -150,7 +161,7 @@ async function promptForApiKey(
   context: vscode.ExtensionContext,
   session: Session,
   log: Logger,
-  panel: ChatViewProvider
+  chat: ChatController
 ): Promise<void> {
   const existing = await context.secrets.get('lexiqode.apiKey');
   const value = await vscode.window.showInputBox({
@@ -169,7 +180,7 @@ async function promptForApiKey(
   // The key is delivered to the process environment, so the core is respawned.
   await session.restart();
   const state = session.currentState;
-  panel.postNotice(
+  chat.postNotice(
     state.connection === 'ready' ? 'API key saved and the core restarted.' : 'Core did not start after the update.',
     state.connection !== 'ready'
   );

@@ -143,6 +143,7 @@ function makeContext() {
 
 const MANIFEST_COMMANDS = [
   'lexiqode.openChat',
+  'lexiqode.openChatInEditor',
   'lexiqode.inlineEdit',
   'lexiqode.setup',
   'lexiqode.locateCore',

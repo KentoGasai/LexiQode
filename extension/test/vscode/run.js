@@ -162,6 +162,32 @@ async function run() {
   await new Promise((resolve) => setTimeout(resolve, 2000));
   step('agent view revealed');
 
+  // 9. The same conversation can be opened as an editor tab, which is the form a
+  // working session needs. The check is the tab itself, not the command result:
+  // a command can resolve while nothing appears.
+  const commands = await vscode.commands.getCommands(true);
+  assert.ok(
+    commands.includes('lexiqode.openChatInEditor'),
+    'the editor-tab command must be registered'
+  );
+  await vscode.commands.executeCommand('lexiqode.openChatInEditor');
+  const tab = await waitFor(() => {
+    const tabs = vscode.window.tabGroups.all.flatMap((group) => group.tabs);
+    return tabs.find((candidate) => candidate.label === 'LexiQode');
+  }, 'the LexiQode editor tab', 15_000);
+  assert.ok(tab, 'the tab must appear');
+  step('agent tab opened', `label "${tab.label}"`);
+
+  // Opening it twice must reveal the tab rather than stack a second one: two
+  // views of one conversation is the confusing outcome to avoid.
+  await vscode.commands.executeCommand('lexiqode.openChatInEditor');
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  const lexTabs = vscode.window.tabGroups.all
+    .flatMap((group) => group.tabs)
+    .filter((candidate) => candidate.label === 'LexiQode');
+  assert.strictEqual(lexTabs.length, 1, `expected one agent tab, found ${lexTabs.length}`);
+  step('reopening reuses the tab');
+
   console.log('\nIn-editor verification passed:\n' + report.join('\n') + '\n');
 }
 
