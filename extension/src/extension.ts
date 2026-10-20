@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { Logger } from './core/logger';
 import { ChatViewProvider } from './ui/panel';
 import { Session } from './session';
-import { setApiKey } from './config';
+import { isCoreRoot, setApiKey } from './config';
 import { registerInlineEdit } from './features/inlineEdit';
 import { runSetup } from './features/setup';
 
@@ -18,6 +18,11 @@ export function activate(context: vscode.ExtensionContext): void {
   const log = new Logger();
   const session = new Session(log, context.secrets);
   const panel = new ChatViewProvider(context.extensionUri, session, log);
+
+  // The core lives in a folder the workspace does not always contain: opening
+  // your own project somewhere else means nothing points at it. Rather than
+  // leaving the user with an error message and a setting name, offer the picker.
+  let corePromptShown = false;
 
   context.subscriptions.push(
     log,
@@ -57,6 +62,29 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('lexiqode.setup', () =>
       runSetup(session, log, context.secrets)
     ),
+
+    vscode.commands.registerCommand('lexiqode.locateCore', () => locateCore(session, log)),
+
+    session.onState(async (state) => {
+      if (state.connection === 'ready') {
+        corePromptShown = false;
+        return;
+      }
+      if (state.connection !== 'error' || corePromptShown) {
+        return;
+      }
+      if (!/core was not found|coreRoot/i.test(state.detail ?? '')) {
+        return;
+      }
+      corePromptShown = true;
+      const choice = await vscode.window.showWarningMessage(
+        'LexiQode could not find its Python core for this folder.',
+        'Locate the core folder'
+      );
+      if (choice === 'Locate the core folder') {
+        await locateCore(session, log);
+      }
+    }),
 
     vscode.commands.registerCommand('lexiqode.showCoreLog', () => log.show()),
 
@@ -160,5 +188,48 @@ async function showCoreInfo(session: Session, log: Logger): Promise<void> {
     const message = error instanceof Error ? error.message : String(error);
     log.error('could not read the core state', error);
     void vscode.window.showErrorMessage(`LexiQode: ${message}`);
+  }
+}
+
+/**
+ * Ask for the folder that contains the `lexiqode` Python package and remember
+ * it, then bring the core up with it.
+ *
+ * The folder is validated before it is saved: picking a project folder by
+ * mistake would otherwise turn into a confusing failure on the next attempt
+ * instead of an explanation here.
+ */
+async function locateCore(session: Session, log: Logger): Promise<void> {
+  const picked = await vscode.window.showOpenDialog({
+    canSelectFiles: false,
+    canSelectFolders: true,
+    canSelectMany: false,
+    openLabel: 'Use this folder as the LexiQode core',
+    title: 'Select the folder that contains the lexiqode package',
+  });
+  if (!picked || !picked.length) {
+    return;
+  }
+  const folder = picked[0].fsPath;
+  if (!isCoreRoot(folder)) {
+    void vscode.window.showErrorMessage(
+      `That folder does not contain a "lexiqode" package (expected ${folder}\\lexiqode\\__init__.py).`
+    );
+    return;
+  }
+
+  await vscode.workspace
+    .getConfiguration('lexiqode')
+    .update('coreRoot', folder, vscode.ConfigurationTarget.Global);
+  log.info(`core folder set to ${folder}`);
+
+  await session.restart();
+  const state = session.currentState;
+  if (state.connection === 'ready') {
+    void vscode.window.showInformationMessage(`LexiQode is connected using ${folder}.`);
+  } else {
+    void vscode.window.showErrorMessage(
+      `LexiQode still could not start the core: ${state.detail ?? 'unknown reason'}`
+    );
   }
 }

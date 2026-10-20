@@ -22,6 +22,7 @@ const MANIFEST_COMMANDS = [
   'lexiqode.openChat',
   'lexiqode.inlineEdit',
   'lexiqode.setup',
+  'lexiqode.locateCore',
   'lexiqode.newSession',
   'lexiqode.cancelTurn',
   'lexiqode.restartCore',

@@ -57,6 +57,11 @@
         "category": "LexiQode"
       },
       {
+        "command": "lexiqode.locateCore",
+        "title": "Locate the Core Folder",
+        "category": "LexiQode"
+      },
+      {
         "command": "lexiqode.newSession",
         "title": "New Session",
         "category": "LexiQode"
