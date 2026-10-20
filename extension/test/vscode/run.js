@@ -21,6 +21,7 @@ const vscode = require('vscode');
 const MANIFEST_COMMANDS = [
   'lexiqode.openChat',
   'lexiqode.inlineEdit',
+  'lexiqode.setup',
   'lexiqode.newSession',
   'lexiqode.cancelTurn',
   'lexiqode.restartCore',

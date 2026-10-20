@@ -1,0 +1,59 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "LexiQode: build the extension",
+      "type": "shell",
+      "command": "npm --prefix extension run compile",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": ["$tsc"],
+      "group": { "kind": "build", "isDefault": true },
+      "presentation": { "reveal": "silent", "panel": "shared", "clear": true }
+    },
+    {
+      "label": "LexiQode: watch the extension",
+      "type": "shell",
+      "command": "npm --prefix extension run watch",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": ["$tsc-watch"],
+      "isBackground": true,
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    },
+    {
+      "label": "LexiQode: install into VSCodium",
+      "type": "shell",
+      "command": "powershell -ExecutionPolicy Bypass -File scripts/install-extension.ps1",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "LexiQode: test the core",
+      "type": "shell",
+      "command": "python -m unittest discover -s tests -t .",
+      "options": { "cwd": "${workspaceFolder}/core" },
+      "group": { "kind": "test", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "LexiQode: test the extension",
+      "type": "shell",
+      "command": "npm --prefix extension test",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "LexiQode: verify inside a real editor",
+      "type": "shell",
+      "command": "powershell -ExecutionPolicy Bypass -File scripts/test-in-editor.ps1",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "LexiQode: check the types the editor sees",
+      "type": "shell",
+      "command": "node extension/tools/check-types.js --editor",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    }
+  ]
+}

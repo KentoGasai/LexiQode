@@ -1,0 +1,27 @@
+{
+  // Use the TypeScript that lives in the repository rather than the one bundled
+  // with the editor. The two can differ, and when they do the editor underlines
+  // code that builds perfectly (TypeScript 6 no longer picks up @types/* on its
+  // own, which shows up as "Cannot find name 'fs'" in every file that imports a
+  // Node built-in). Pinning removes that whole class of confusion.
+  "typescript.tsdk": "extension/node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true,
+
+  // Keep the tree readable: build output and Python caches are noise.
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/*.pyc": true
+  },
+  "search.exclude": {
+    "extension/node_modules": true,
+    "extension/out": true,
+    "**/__pycache__": true
+  },
+
+  // The core writes its own JSON; keep the editor's formatter out of it.
+  "[python]": {
+    "editor.rulers": [110]
+  },
+  "python.testing.unittestEnabled": true,
+  "python.testing.unittestArgs": ["-s", "core/tests", "-t", "core", "-p", "test_*.py"]
+}

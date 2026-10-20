@@ -36,16 +36,18 @@ because it uses public APIs only. Nothing about it is VSCodium-specific.
    ```
 
 2. Start the editor and open a folder.
-3. Point the agent at your endpoint. Either run **LexiQode: Set the Model API
-   Key** from the command palette and set `lexiqode.baseUrl` / `lexiqode.model`
-   in settings, or configure the core directly with
-   `python -m lexiqode config set ...` and leave the editor settings empty.
+3. Run **LexiQode: Set Up the Model Endpoint**: it asks for the endpoint, the key
+   and the model, and for the model it queries your server first so you choose
+   from a list instead of typing. Alternatively set `lexiqode.baseUrl` and
+   `lexiqode.model` yourself plus **Set the Model API Key**, or configure the core
+   directly with `python -m lexiqode config set ...` and leave these empty.
 4. Open the LexiQode icon in the activity bar and ask for something.
 
 ## Commands
 
 | command | what it does |
 |---|---|
+| `LexiQode: Set Up the Model Endpoint` | endpoint, key and model in three steps |
 | `LexiQode: Open Agent` | reveal the panel |
 | `LexiQode: Edit Selection with AI` | inline edit of the selection |
 | `LexiQode: New Session` | clear the conversation and start fresh |
@@ -94,7 +96,14 @@ cd extension
 npm install
 npm run compile          # or: npm run watch
 node test/client.test.js # drives the compiled client against a real core
+npm run check-types:editor  # the types the editor itself would report
 ```
+
+`check-types:editor` is worth knowing about: the editor ships its own TypeScript
+(6.0, which stopped picking up `@types/*` automatically) while `npm run compile`
+uses the repository's. When they disagree the editor underlines code that builds
+fine. `tsconfig.json` names `node` explicitly and `.vscode/settings.json` pins the
+editor to the repository's TypeScript so both sides agree.
 
 `test/client.test.js` needs no editor and no model endpoint: it spawns the core
 in a temporary workspace, reads the handshake, runs a turn (which fails against

@@ -1,0 +1,53 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // Press F5 with this one selected: VSCodium opens with the extension loaded
+      // from source and this repository as the workspace, so the core is found
+      // automatically (it looks for a "core" folder next to the workspace).
+      "name": "LexiQode: run in VSCodium",
+      "type": "extensionHost",
+      "request": "launch",
+      "runtimeExecutable": "${env:LOCALAPPDATA}\\Programs\\VSCodium\\VSCodium.exe",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/extension",
+        "--disable-workspace-trust",
+        "${workspaceFolder}"
+      ],
+      "outFiles": ["${workspaceFolder}/extension/out/**/*.js"],
+      "preLaunchTask": "LexiQode: build the extension"
+    },
+    {
+      // The same thing using whichever editor you pressed F5 in. Handy while
+      // working on the extension in VS Code and keeping VSCodium for the run.
+      "name": "LexiQode: run in this editor",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/extension",
+        "--disable-workspace-trust",
+        "${workspaceFolder}"
+      ],
+      "outFiles": ["${workspaceFolder}/extension/out/**/*.js"],
+      "preLaunchTask": "LexiQode: build the extension"
+    },
+    {
+      "name": "LexiQode: verify inside VSCodium",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/extension/test/vscode/run.js",
+      "preLaunchTask": "LexiQode: verify inside a real editor",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "name": "LexiQode: test the core (Python)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "unittest",
+      "args": ["discover", "-s", "tests", "-t", "."],
+      "cwd": "${workspaceFolder}/core",
+      "console": "integratedTerminal"
+    }
+  ]
+}

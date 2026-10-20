@@ -64,14 +64,37 @@ python scripts/smoke_core.py                     # end-to-end run against a loca
 # 1. get VSCodium (portable, verified against the published sha256)
 powershell -ExecutionPolicy Bypass -File scripts\install-vscodium.ps1
 
-# 2. build and install the extension
-powershell -ExecutionPolicy Bypass -File scripts\install-extension.ps1
+# 2. once per checkout: the extension's build dependencies
+cd extension; npm install; cd ..
+
+# 3. build, install into the editor, and start it
+powershell -ExecutionPolicy Bypass -File scripts\run-lexiqode.ps1
 ```
 
-Start VSCodium, open a folder, and click the LexiQode icon in the activity bar.
-Point the agent at your endpoint with `LexiQode: Set the Model API Key` plus
-`lexiqode.baseUrl` / `lexiqode.model`, or configure the core itself with
-`python -m lexiqode config set ...` and leave the editor settings empty.
+Step 3 is repeatable: it rebuilds, replaces the installed copy and starts the
+editor. In the editor, open the LexiQode icon in the activity bar.
+
+**Point it at your model.** Run `LexiQode: Set Up the Model Endpoint` from the
+command palette. It asks for the endpoint, the key and the model - and for the
+model it asks *your server* for the list first, so you pick instead of typing.
+The key goes into the operating system's credential store, the endpoint and model
+into your user settings; no file in the repository is touched.
+
+If you prefer to keep configuration in the core instead of the editor, the same
+three values work there and the editor settings can stay empty:
+
+```bash
+python -m lexiqode config set profile.default.base_url https://your-gateway.example.com/v1
+python -m lexiqode config set profile.default.model    your-model-id
+python -m lexiqode config set profile.default.api_key  sk-...
+```
+
+### While working on the extension
+
+Press <kbd>F5</kbd> in the editor: the launch configuration **LexiQode: run in
+VSCodium** opens VSCodium with the extension loaded from source and this
+repository as the workspace, so the core is found automatically. Use the task
+**LexiQode: watch the extension** in the background for a compile-on-save loop.
 
 Inside the editor:
 
@@ -92,9 +115,17 @@ Three levels, cheapest first:
 | `cd core; python -m unittest discover -s tests -t .` | the agent loop, tools, approvals and HTTP surface (116 tests) |
 | `cd extension; npm test` | the client against a real core process, and activation with a stubbed editor (12 tests) |
 | `powershell -File scripts\test-in-editor.ps1` | the extension loaded and running inside a real VSCodium: activation, commands, settings schema, a real core spawn, the handshake, token enforcement, the view revealing |
+| `cd extension; npm run check-types:editor` | the types **the editor** sees, using its own bundled TypeScript |
 
 The in-editor run uses a throwaway user profile and a core pointed at a closed
 port, so it needs no model, no key and touches none of your own settings.
+
+`check-types:editor` exists because the editor and the build can disagree: the
+editor ships its own TypeScript (6.0, which no longer picks up `@types/*` on its
+own) while `npm run compile` uses the repository's. When they differ the editor
+underlines code that builds perfectly. `tsconfig.json` names `node` explicitly and
+`.vscode/settings.json` pins the editor to the repository's TypeScript, so both
+sides see the same thing.
 
 ## How the pieces fit
 

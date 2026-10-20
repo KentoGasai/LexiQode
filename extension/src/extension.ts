@@ -4,6 +4,7 @@ import { ChatViewProvider } from './ui/panel';
 import { Session } from './session';
 import { setApiKey } from './config';
 import { registerInlineEdit } from './features/inlineEdit';
+import { runSetup } from './features/setup';
 
 /**
  * Activation.
@@ -51,6 +52,10 @@ export function activate(context: vscode.ExtensionContext): void {
 
     vscode.commands.registerCommand('lexiqode.setApiKey', () =>
       promptForApiKey(context, session, log, panel)
+    ),
+
+    vscode.commands.registerCommand('lexiqode.setup', () =>
+      runSetup(session, log, context.secrets)
     ),
 
     vscode.commands.registerCommand('lexiqode.showCoreLog', () => log.show()),
