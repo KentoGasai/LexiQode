@@ -1,18 +1,22 @@
-"""Guards for the source-build script, which cannot be run in CI on Linux.
+"""Guards for the source build, which cannot be run in CI on Linux.
 
-Three failures in a row came from this file's neighbourhood, and all three cost a
-full Windows packaging run (~40 minutes) to discover:
+Every failure so far in this area cost a full Windows packaging run (~40 minutes)
+to discover, and each one was avoidable:
 
 * a ref that had no tag, and a hard-coded path that only existed locally;
 * a packaging step that needs an artifact from a vendor extension;
 * a guard that searched for a bare function name, which also occurs in the
-  function's own definition - it would have thrown on a healthy tree.
+  function's own definition - it would have thrown on a healthy tree;
+* a removal that left two references behind, because the references were taken out
+  one at a time from a script no test could exercise.
 
-The rules below are cheap to check here and expensive to check in CI, so they are
-checked here: every text patch the script applies to the upstream sources must
-match the exact upstream line and must not match the look-alikes around it, the
-patches must be ordered after the dependency install, and the packaging step must
-report its own reason instead of a bare exit code.
+The lesson of the last one shapes this file. The surgery now lives in
+`scripts/remove-vendor-chat.mjs`, which has its own behavioural test that CI runs,
+so it is checked by running it rather than by reading it. What is left to guard
+here is the arrangement around it: that the build script delegates instead of
+patching upstream files itself, that the call happens before the dependency
+install for the reason given below, and that a packaging failure reports its own
+cause instead of a bare exit code.
 
     python scripts/tests/test_ide_script.py
 """
@@ -25,25 +29,9 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent.parent
 SCRIPT = REPO / "scripts" / "build-ide.ps1"
+REMOVAL = REPO / "scripts" / "remove-vendor-chat.mjs"
+REMOVAL_TEST = REPO / "scripts" / "tests" / "remove-vendor-chat.test.mjs"
 WORKFLOW = REPO / ".github" / "workflows" / "build-ide.yml"
-
-#: Real upstream lines, exactly as they appear at the pinned tag.
-POSITIVE = {
-    "install list entry": "\t'extensions/copilot',\n",
-    "compile step": "\t\t\tcompileCopilotExtensionBuildTask,\n",
-    "shim step": "\t\t\tprepareCopilotRipgrepShimTask(platform, arch, destinationFolderName)\n",
-}
-
-#: Lines that a careless pattern would also match. Removing any of these would
-#: either delete live code or, worse, let the script believe it had succeeded.
-NEGATIVE = [
-    # The definition of the removed task still contains the bare name.
-    "function prepareCopilotRipgrepShimTask(platform: string, arch: string, destinationFolderName: string): void {\n",
-    # A single-line import contains the compile task's name.
-    "import { checkApiProposalNamesTask, compileAllExtensionsBuildTask, compileCopilotExtensionBuildTask } from './lib/compilation.ts';\n",
-    # A comment mentioning the path must not be treated as the path.
-    "\tconst builtInCopilotExtensionDir = path.join(appBase, 'extensions', 'copilot');\n",
-]
 
 failures: list[str] = []
 checks = 0
@@ -58,74 +46,61 @@ def check(condition: bool, description: str) -> None:
         print(f"  FAIL  {description}")
         failures.append(description)
 
-
-def extract_patterns(text: str) -> list[str]:
-    """Every upstream-edit regex the script applies, in the order it applies them.
-
-    Only the ones that anchor a whole line, marked by `(?m)`: other `-Pattern`
-    literals in the script feed Select-String and are not edits to the sources.
-    """
-
-    return [match.group(2) for match in re.finditer(r"Pattern\s*=?\s*(['\"])(\(\?m\).*?)\1", text)]
-
-
 def main() -> int:
     text = SCRIPT.read_text(encoding="utf-8")
-    patterns = extract_patterns(text)
+    removal = REMOVAL.read_text(encoding="utf-8")
 
-    print("the script applies text patches to upstream sources")
-    for pattern in patterns:
-        print(f"        {pattern}")
+    print("the removal is delegated to a script that is tested by running it")
+    check(REMOVAL.is_file(), "scripts/remove-vendor-chat.mjs exists")
+    check(REMOVAL_TEST.is_file(), "it has a behavioural test of its own")
+    check("remove-vendor-chat.mjs" in text, "the build script calls it")
+    called_with = text.split("remove-vendor-chat.mjs", 1)[1][:160] if "remove-vendor-chat.mjs" in text else ""
+    check("$Source" in called_with, "it is called with the source directory, not a fixed path")
     check(
-        len(patterns) == 6,
-        f"found {len(patterns)} upstream-edit patterns (expected 6: three applied, three re-checked)",
+        "Remove-UpstreamLine" not in text,
+        "the build script no longer patches upstream files line by line",
     )
-
-    # The same three patterns appear twice: once to apply, once to re-verify.
-    for label, line in POSITIVE.items():
-        matching = [p for p in patterns if re.search(p, line)]
-        check(len(matching) >= 1, f"a pattern matches the real upstream {label}")
 
     print()
-    print("no pattern matches a look-alike line")
-    for look_alike in NEGATIVE:
-        matching = [p for p in patterns if re.search(p, look_alike)]
-        check(
-            not matching,
-            f"no pattern matches: {look_alike.strip()[:70]}",
-        )
-
-    print()
-    print("upstream patches are verified, not assumed")
-    check("Remove-UpstreamLine" in text, "the removal helper exists")
+    print("the removal reaches every reference, and verifies before it writes")
+    for target in ("build/npm/dirs.ts", "build/gulpfile.vscode.ts", "package.json"):
+        check(target in removal, f"it edits {target}")
     check(
-        text.count("Remove-UpstreamLine -Path") >= 3,
-        "all three upstream lines are removed through the helper",
+        "JSON.parse" in removal and "JSON.stringify" in removal,
+        "package.json is edited through the parser, not by text",
     )
     check(
-        "could not remove" in text and "upstream changed that line" in text,
-        "a pattern that stops matching is an error, not a silent skip",
+        "stillReachesExtension" in removal,
+        "a script is judged by whether it can reach the extension, not by whether "
+        "it contains the word copilot",
     )
     check(
-        text.count("the packaging would fail") >= 1,
-        "the applied edits are re-checked afterwards",
+        "const planned = [editPackageJson(root), ...planLines(root, LINE_EDITS)]" in removal,
+        "every edit is planned before any file is written, so a failure leaves the "
+        "tree untouched",
     )
+    check(
+        "isAlreadyClean" in removal,
+        "a second run is a no-op, so rebuilding an already-patched tree is safe",
+    )
+    check(removal.count("fail(") >= 6, "each failure path reports instead of continuing")
 
     print()
     print("the order of the build steps is load-bearing")
     order = [
-        text.find("installing dependencies"),
         text.find("removing the built-in vendor chat extension"),
+        text.find("installing dependencies"),
         text.find("applying our identity"),
         text.find("packaging a Windows x64 build"),
     ]
     check(all(index >= 0 for index in order), "all four steps are present")
     check(
         order[0] < order[1],
-        "the vendor chat extension is removed after the install, because postinstall "
-        "does not check that a listed directory exists",
+        "the removal runs before the install: its install-list entry goes in the same "
+        "step, and leaving it installs four minutes of dependencies for an extension "
+        "that will not ship",
     )
-    check(order[1] < order[2] < order[3], "removal happens before branding and packaging")
+    check(order[1] < order[2] < order[3], "then install, branding and packaging")
 
     print()
     print("a failure explains itself instead of ending in a bare exit code")
@@ -160,6 +135,10 @@ def main() -> int:
         check(
             "test_ide_script.py" in verify_block,
             "this guard runs in CI, otherwise it protects nothing",
+        )
+        check(
+            "remove-vendor-chat.test.mjs" in verify_block,
+            "the removal test runs in CI too",
         )
     else:
         check(False, f"the workflow exists at {WORKFLOW}")

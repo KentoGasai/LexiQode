@@ -138,6 +138,14 @@ first.
   either runs from source or packages. When packaging fails it prints the reason
   from the packaging output at the end of its own log, because gulp puts that line
   before its stack trace and a pasted tail never contains it
+- `scripts/remove-vendor-chat.mjs`: the surgery that takes the vendor chat extension
+  out of the sources. It rewrites nine `package.json` scripts through the JSON parser,
+  drops one line from the install list and two from the packaging series, then deletes
+  the directory. Everything is validated before anything is written, so a run that
+  fails leaves the tree untouched. It is a script rather than a few lines in the build
+  because two references were missed when it was the latter, and each miss cost a
+  forty-minute build; `scripts/tests/remove-vendor-chat.test.mjs` covers it and CI
+  runs that test on every commit
 - `scripts/check-prerequisites.ps1`: reports what a machine is missing and the one
   command that fixes it
 - `scripts/check_branding.py`: `--source` predicts what branding a given upstream
@@ -165,6 +173,16 @@ than passing over them in silence.
   its entry is dropped from `build/npm/dirs.ts` at the same time. Each edit is verified
   against the upstream text and re-checked afterwards, so a moved line upstream fails in
   seconds instead of twenty minutes into packaging.
+- `extensions/copilot` is **removed** by `scripts/remove-vendor-chat.mjs`, together with
+  one line in `build/npm/dirs.ts`, two lines in `build/gulpfile.vscode.ts` and nine
+  scripts in the root `package.json` (`compile`, `watch` and `watch-transpile` keep
+  working without it; `compile-copilot`, `watch-copilot`, `watch-copilotd`,
+  `kill-watch-copilotd`, `copilot:setup` and `copilot:get_token` are deleted). The
+  packaging step that failed existed only to materialize that extension's SDK natives.
+  Our agent lives in the secondary side bar and has no use for it. The removal runs
+  *before* `npm install`, which is possible only because the install list entry goes in
+  the same step: the list is walked without an existence check, and leaving it would
+  install the extension's dependency tree for four minutes and then fail.
 
 Neither can reach the network on its own: their endpoints are among the fifteen
 URLs that are emptied. What they can still do is put a vendor's name in front of

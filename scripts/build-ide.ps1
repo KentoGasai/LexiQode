@@ -134,6 +134,32 @@ if ($wanted -and $have -ne $wanted) {
     Write-Host "  note: the source asks for Node $wanted, this is $have. Native modules are built for the running version, so a mismatch can bite later." -ForegroundColor Yellow
 }
 
+# ------------------------------------------------------------------ product shape
+
+Write-Step 'removing the built-in vendor chat extension'
+# Upstream ships its own chat extension as a built-in, together with a packaging step
+# whose only job is to materialize that extension's SDK natives. The step throws when the
+# directory is missing, which is how an earlier packaging run failed:
+#
+#   Error: [prepareBuiltInCopilotRipgrepShim] Copilot SDK directory not found at
+#   ...\resources\app\extensions\copilot\node_modules\@github\copilot\sdk
+#
+# Neither the extension nor the step belongs in this product: the agent is ours, and this
+# is meant to run without a vendor account.
+#
+# The surgery itself lives in one script, not here. It rewrites nine scripts in
+# package.json through the JSON parser, drops one line from the install list and two from
+# the packaging series, then deletes the directory. Doing that with a few replacements in
+# this file is how two references were missed before, each miss costing a forty-minute
+# build. scripts/tests/remove-vendor-chat.test.mjs covers it and CI runs that test, so a
+# mistake is caught in a minute on a free runner instead.
+#
+# It runs before `npm install` on purpose. The install list still points at the removed
+# directory when this starts, and removing the entry first is what saves about four
+# minutes of installing dependencies for an extension that will not ship.
+& node (Join-Path $repo 'scripts\remove-vendor-chat.mjs') $Source
+if ($LASTEXITCODE -ne 0) { throw "removing the vendor chat extension failed with exit code $LASTEXITCODE" }
+
 # ------------------------------------------------------------------ dependencies
 
 if (-not $SkipInstall) {
@@ -145,79 +171,6 @@ if (-not $SkipInstall) {
     } finally {
         Pop-Location
     }
-}
-
-# ------------------------------------------------------------------ product shape
-
-Write-Step 'removing the built-in vendor chat extension'
-# Upstream ships its own chat extension as a built-in (`extensions/copilot`), together
-# with a packaging step whose only job is to materialize that extension's SDK natives.
-# The step throws when the SDK directory is absent, and that is exactly what stopped
-# the packaging run:
-#
-#   Error: [prepareBuiltInCopilotRipgrepShim] Copilot SDK directory not found at
-#   ...\VSCode-win32-x64\resources\app\extensions\copilot\node_modules\@github\copilot\sdk
-#
-# Neither the extension nor the step belongs in this product: the agent is ours, and
-# this is meant to run without a vendor account. Removing the folder before anything is
-# bundled also skips bundling the extension and installing its dependency tree (a
-# language model SDK, several provider SDKs and OpenTelemetry).
-#
-# Placement is not arbitrary. This has to run *after* `npm install`, because
-# `build/npm/postinstall.ts` walks its directory list without checking that a directory
-# still exists, so a folder missing at install time fails the install itself.
-function Remove-UpstreamLine {
-    param(
-        [Parameter(Mandatory)] [string] $Path,
-        [Parameter(Mandatory)] [string] $Label,
-        [Parameter(Mandatory)] [string] $Pattern
-    )
-    # Each edit is checked against the upstream text: a silent non-application would put
-    # the same failure back on the next run, so a moved line is an error to fix rather
-    # than something to skip past.
-    $text = [System.IO.File]::ReadAllText($Path, [System.Text.Encoding]::UTF8)
-    if (-not [regex]::IsMatch($text, $Pattern)) {
-        throw "could not remove $Label from $(Split-Path $Path -Leaf): upstream changed that line, and leaving it would fail the build again"
-    }
-    $updated = [regex]::Replace($text, $Pattern, '')
-    [System.IO.File]::WriteAllText($Path, $updated, (New-Object System.Text.UTF8Encoding($false)))
-    Write-Host "  removed $Label"
-}
-
-$gulpfile = Join-Path $Source 'build\gulpfile.vscode.ts'
-$dirsFile = Join-Path $Source 'build\npm\dirs.ts'
-foreach ($required in @($gulpfile, $dirsFile)) {
-    if (-not (Test-Path $required)) { throw "a build file is missing: $required" }
-}
-
-Remove-UpstreamLine -Path $dirsFile -Label 'extensions/copilot from the install list' `
-    -Pattern "(?m)^\s*'extensions/copilot',\r?\n"
-Remove-UpstreamLine -Path $gulpfile -Label 'the copilot compile step' `
-    -Pattern '(?m)^\s*compileCopilotExtensionBuildTask,\r?\n'
-Remove-UpstreamLine -Path $gulpfile -Label 'the copilot shim step' `
-    -Pattern '(?m)^\s*prepareCopilotRipgrepShimTask\(platform, arch, destinationFolderName\)\r?\n'
-
-# The call sites must be gone, not merely the folder: a leftover call is what fails the
-# packaging twenty minutes in, looking unrelated to its cause when it does. The check
-# re-runs the same anchored patterns rather than searching for a bare name, because the
-# name also appears in the now-dead function definition and in an import.
-foreach ($edit in @(
-        @{ File = $dirsFile; Label = 'the install list entry'; Pattern = "(?m)^\s*'extensions/copilot',\r?\n" },
-        @{ File = $gulpfile; Label = 'the compile step'; Pattern = '(?m)^\s*compileCopilotExtensionBuildTask,\r?\n' },
-        @{ File = $gulpfile; Label = 'the shim step'; Pattern = '(?m)^\s*prepareCopilotRipgrepShimTask\(platform, arch, destinationFolderName\)\r?\n' }
-    )) {
-    $text = [System.IO.File]::ReadAllText($edit.File, [System.Text.Encoding]::UTF8)
-    if ([regex]::IsMatch($text, $edit.Pattern)) {
-        throw "$($edit.Label) is still in $(Split-Path $edit.File -Leaf); the packaging would fail"
-    }
-}
-
-$vendorChat = Join-Path $Source 'extensions\copilot'
-if (Test-Path $vendorChat) {
-    Remove-Item $vendorChat -Recurse -Force
-    Write-Host '  removed extensions/copilot'
-} else {
-    Write-Host '  extensions/copilot was already absent' -ForegroundColor Yellow
 }
 
 # ------------------------------------------------------------------ branding
