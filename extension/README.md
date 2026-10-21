@@ -8,9 +8,12 @@ because it uses public APIs only. Nothing about it is VSCodium-specific.
 
 ## What it does
 
-* **Agent panel** in the activity bar. Ask for a change in plain language; the
-  agent reads the workspace, edits files and runs your tests, streaming its work
-  into the panel as it goes.
+* **Agent chat in the secondary side bar**, the position other coding agents use.
+  Ask for a change in plain language; the agent reads the workspace, edits files
+  and runs your tests, streaming its work into the transcript as it goes.
+* **Modes in the composer**, next to the field they apply to: Agent, Ask, Plan,
+  Debug and Review. Picking one is not cosmetic - the core removes the tools the
+  mode does not allow, so Ask, Plan and Review cannot write to a file at all.
 * **Approval before anything risky.** Writing files and running commands is
   gated. When the sidebar is visible the question appears inline; when it is
   collapsed you get a modal dialog instead, so a hidden panel never turns into a
@@ -41,7 +44,8 @@ because it uses public APIs only. Nothing about it is VSCodium-specific.
    from a list instead of typing. Alternatively set `lexiqode.baseUrl` and
    `lexiqode.model` yourself plus **Set the Model API Key**, or configure the core
    directly with `python -m lexiqode config set ...` and leave these empty.
-4. Open the LexiQode icon in the activity bar and ask for something.
+4. The chat opens itself the first time you open a project. After that, the
+   LexiQode icon at the right or `Ctrl+Alt+L` brings it back.
 
 ## Commands
 
@@ -75,7 +79,7 @@ because it uses public APIs only. Nothing about it is VSCodium-specific.
 ## How the pieces connect
 
 ```
-activity bar view  ──►  this extension  ──►  core process  ──►  your endpoint
+secondary side bar  ──►  this extension  ──►  core process  ──►  your endpoint
  (webview, no secrets)   (spawn, HTTP,      (agent loop,        /chat/completions
                           SSE, diffs)        tools, approvals)
 ```

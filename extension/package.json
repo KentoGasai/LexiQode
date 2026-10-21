@@ -225,7 +225,8 @@
     "test:client": "node test/client.test.js",
     "test:activation": "node test/activation.test.js",
     "test:chat": "node test/chat.test.js",
-    "test": "npm run test:activation && npm run test:chat && npm run test:client",
+    "test:webview": "node test/webview.test.js",
+    "test": "npm run test:activation && npm run test:chat && npm run test:webview && npm run test:client",
     "check-types": "node tools/check-types.js",
     "check-types:editor": "node tools/check-types.js --editor"
   },
