@@ -38,7 +38,47 @@ on:
 # GitHub reject the entire file with "Unrecognized named-value: 'runner'" and no
 # build runs at all. scripts/tests/test_workflow.py fails if that reappears.
 jobs:
+  # Cheap checks first. They take seconds on Linux and they cover exactly the class
+  # of mistake that otherwise costs a forty-minute Windows run: a branding rule the
+  # overlay does not satisfy, a workflow GitHub refuses to load, a pinned tag that
+  # does not exist, a TypeScript error in the extension. `build` waits for this job,
+  # so a broken commit never reaches the expensive runner.
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out this repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Install the test dependency
+        run: python -m pip install --quiet pyyaml
+
+      - name: Check the branding the overlay produces for the pinned tag
+        run: python scripts/check_branding.py --source ide/upstream-product.json
+
+      - name: Run the branding and workflow rule tests
+        run: |
+          python scripts/tests/test_check_branding.py
+          python scripts/tests/test_workflow.py
+
+      - name: Set up Node from the source requirements
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: 'ide/vscode-node-version.txt'
+
+      - name: Compile the extension
+        working-directory: extension
+        run: |
+          npm install --no-audit --no-fund
+          npm run compile
+
   build:
+    needs: verify
     # Visual Studio 2022 with the C++ workload and the Windows 11 SDK.
     runs-on: windows-2022
     timeout-minutes: 90
@@ -109,6 +149,12 @@ jobs:
         shell: pwsh
         env:
           VSCODE_SOURCE: ${{ runner.temp }}\vscode
+          # Packaging fetches the three built-in extensions through the GitHub API
+          # (build/lib/fetch.ts, fetchGithub), and unauthenticated calls are rate
+          # limited per address - a shared runner address can exhaust that, and the
+          # failure reads "you may be rate limited". The token Actions provides for
+          # the run costs nothing here and removes the limit.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         # -NoProfile and an explicit policy: the build must not depend on shell
         # state the runner happens to have, and a .ps1 invoked by path is otherwise
         # subject to the session's execution policy.

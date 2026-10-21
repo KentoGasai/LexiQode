@@ -197,6 +197,20 @@ class StructureTest(unittest.TestCase):
             "the artifact must be verified before it is uploaded",
         )
 
+    def test_the_expensive_job_waits_for_the_cheap_checks(self) -> None:
+        jobs = self.document["jobs"]
+        self.assertIn("verify", jobs, "the cheap verification job is missing")
+        self.assertEqual(
+            jobs["build"].get("needs"),
+            "verify",
+            "the Windows build must wait for the checks that cost seconds, not the "
+            "other way round",
+        )
+
+    def test_the_verification_job_runs_on_a_cheap_runner(self) -> None:
+        jobs = self.document["jobs"]
+        self.assertEqual(jobs["verify"]["runs-on"], "ubuntu-latest")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

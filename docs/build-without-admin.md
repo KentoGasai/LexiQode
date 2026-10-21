@@ -24,6 +24,16 @@ require:
 | `Microsoft.VisualStudio.Component.Windows11SDK.26100` | 17.14.37011.9 |
 | `Microsoft.VisualStudio.Component.VC.ATL.Spectre`, `...ATLMFC.Spectre` | 17.14.36510.44 |
 
+The Windows SDK is not optional even though nothing is signed: packaging a Windows
+build spawns `signtool.exe` to verify and strip Authenticode signatures on every
+native binary it ships (`build/gulpfile.vscode.ts`, and the same in
+`build/gulpfile.reh.ts` for the server). `signtool.exe` lives in
+`Windows Kits\10\bin\<version>\x64`, which is not on `PATH` by default, so a build
+would run to the very end and then fail with `spawn signtool.exe ENOENT`.
+`scripts/build-ide.ps1` now locates the newest installed SDK, puts it on `PATH` for
+the build, and refuses to start without it - a clear failure in a second instead of
+a wasted run.
+
 `.github/workflows/build-ide.yml` does the whole job: clone the sources at a
 pinned tag, compile the extension, brand `product.json`, package
 `vscode-win32-x64`, fold the agent in as a built-in extension and the Python core
@@ -41,6 +51,11 @@ only when it touches `ide/**`, the build script or the workflow itself. Changes 
 the agent are covered by the local suites, and each run costs Windows minutes at
 a 2x multiplier on a private repository, so a build with a new agent is asked for
 deliberately.
+
+The workflow has two jobs. `verify` runs on Linux, takes seconds, and checks the
+branding rules, the workflow's own shape and that the extension compiles; `build`
+runs on Windows and waits for it. That order exists because a rule violation caught
+after forty minutes of Windows minutes is an expensive way to learn it.
 
 Before the artifact is uploaded, `scripts/check_branding.py --built` inspects the
 packaged files: identity, telemetry, gallery, and that no URL points at a vendor

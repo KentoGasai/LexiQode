@@ -61,6 +61,35 @@ function Test-CppToolchain {
     return $null
 }
 
+function Find-SignTool {
+    # Packaging a Windows build verifies and strips Authenticode signatures with
+    # signtool.exe (build/gulpfile.vscode.ts spawns it for every win32 target, and
+    # build/gulpfile.reh.ts does the same for the server), so the Windows SDK has to
+    # be *reachable*, not merely installed. Its bin folder is not on PATH by
+    # default, which is why a packaging run would otherwise fail at the very end
+    # with "spawn signtool.exe ENOENT" after taking the whole build to get there.
+    $roots = @(
+        (Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'),
+        (Join-Path $env:ProgramFiles 'Windows Kits\10\bin')
+    ) | Where-Object { $_ -and (Test-Path $_) }
+
+    $candidates = foreach ($root in $roots) {
+        Get-ChildItem $root -Directory -ErrorAction SilentlyContinue |
+            ForEach-Object { Join-Path $_.FullName 'x64\signtool.exe' } |
+            Where-Object { Test-Path $_ }
+    }
+    if (-not $candidates) { return $null }
+
+    # Several SDKs can be installed side by side; the newest one is the least
+    # likely to choke on a modern PE header.
+    return $candidates |
+        Sort-Object {
+            $match = [regex]::Match((Split-Path (Split-Path $_ -Parent) -Leaf), '\d+(\.\d+)+')
+            if ($match.Success) { [version]$match.Value } else { [version]'0.0' }
+        } -Descending |
+        Select-Object -First 1
+}
+
 Write-Step 'checking the toolchain'
 if (-not (Test-Path (Join-Path $Source 'package.json'))) {
     throw "no VS Code source tree at $Source. Clone it with: git clone --depth 1 https://github.com/microsoft/vscode.git $Source"
@@ -79,6 +108,25 @@ if (-not $vs) {
 Write-Host "  Visual Studio: $vs"
 Write-Host "  node: $(node -v)"
 Write-Host "  source: $Source"
+
+if (-not $Dev) {
+    $signtool = Find-SignTool
+    if (-not $signtool) {
+        Write-Host 'the Windows SDK is missing, and packaging needs it' -ForegroundColor Yellow
+        Write-Host 'signtool.exe from the SDK is what verifies and strips Authenticode signatures'
+        Write-Host 'while packaging (build/gulpfile.vscode.ts). Without it the build would run to'
+        Write-Host 'the end and then fail with "spawn signtool.exe ENOENT". Install the component:'
+        Write-Host ''
+        Write-Host '  winget install --id Microsoft.VisualStudio.BuildTools -e --source winget --override "--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --add Microsoft.VisualStudio.Component.Windows11SDK.26100"'
+        Write-Host ''
+        Write-Host 'Or run with -Dev to compile and start the editor without packaging.'
+        throw 'the Windows SDK (signtool.exe) is required to package a Windows build'
+    }
+    # The build shells out to signtool; putting its folder first means it wins over
+    # any other copy the machine happens to have.
+    $env:PATH = "$(Split-Path $signtool -Parent);$env:PATH"
+    Write-Host "  signtool: $signtool"
+}
 
 $wanted = (Get-Content (Join-Path $Source '.nvmrc') -Raw).Trim()
 $have = (node -v).TrimStart('v')
