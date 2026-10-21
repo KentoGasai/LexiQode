@@ -134,7 +134,10 @@ first.
   list drives `scripts/check_branding.py`, so the transform and the release check
   cannot drift apart
 - `scripts/build-ide.ps1`: probes the toolchain before touching anything, applies
-  branding, compiles, and either runs from source or packages
+  branding, removes the built-in vendor chat extension (see below), compiles, and
+  either runs from source or packages. When packaging fails it prints the reason
+  from the packaging output at the end of its own log, because gulp puts that line
+  before its stack trace and a pasted tail never contains it
 - `scripts/check-prerequisites.ps1`: reports what a machine is missing and the one
   command that fixes it
 - `scripts/check_branding.py`: `--source` predicts what branding a given upstream
@@ -153,9 +156,15 @@ than passing over them in silence.
   extension, and `providerExtensionId` names its authentication extension. They
   are typed as required strings in `IDefaultChatAgent`, so they cannot simply be
   dropped, and their meaning has to be replaced rather than emptied.
-- `extensions/copilot` ships inside the build: upstream's own chat extension. It
-  is what would offer a vendor sign-in in the built-in chat surface. Our agent
-  lives in the secondary side bar and does not use it.
+- `extensions/copilot` is **removed** by the build script, together with the two
+  references to it in `build/gulpfile.vscode.ts`. That step materialized the
+  extension's SDK natives and threw when they were absent, which is how the first
+  packaging run failed. Our agent lives in the secondary side bar and has no use for
+  it. The order is forced: `build/npm/postinstall.ts` walks its directory list without
+  checking that a directory exists, so the folder is removed *after* `npm install` and
+  its entry is dropped from `build/npm/dirs.ts` at the same time. Each edit is verified
+  against the upstream text and re-checked afterwards, so a moved line upstream fails in
+  seconds instead of twenty minutes into packaging.
 
 Neither can reach the network on its own: their endpoints are among the fifteen
 URLs that are emptied. What they can still do is put a vendor's name in front of
