@@ -1,53 +1,52 @@
 <#
 .SYNOPSIS
-    Start the editor with LexiQode ready to use.
+    Start the installed LexiQode build.
 
 .DESCRIPTION
-    Compiles the extension, installs it into VSCodium's profile and then starts
-    VSCodium on a folder. Run it once and the editor is usable; run it again after
-    changing the code and the installed copy is refreshed first.
+    Launches the product this repository builds, not a development host and not a
+    foreign editor. The build is a local installation, so nothing needs to be
+    installed or elevated to run it.
 
-    The first thing to do inside the editor is run "LexiQode: Set Up the Model
-    Endpoint" from the command palette - three questions, and the agent works.
+    The agent chat sits in the right-hand side bar and opens itself the first time
+    a project is opened.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File scripts/run-lexiqode.ps1
     powershell -ExecutionPolicy Bypass -File scripts/run-lexiqode.ps1 -Workspace C:\src\my-project
-    powershell -ExecutionPolicy Bypass -File scripts/run-lexiqode.ps1 -Rebuild
 #>
 
 param(
+    [string]$Install = (Join-Path $env:LOCALAPPDATA 'Programs\LexiQode'),
+    # Defaults to this repository, which is the tree the agent was built against.
     [string]$Workspace = (Split-Path -Parent $PSScriptRoot),
-    [switch]$Rebuild
+    [switch]$Wait
 )
 
 $ErrorActionPreference = 'Stop'
-$repo = Split-Path -Parent $PSScriptRoot
-$exe = Join-Path $env:LOCALAPPDATA 'Programs\VSCodium\VSCodium.exe'
 
+$exe = Join-Path $Install 'LexiQode.exe'
 if (-not (Test-Path $exe)) {
-    throw "VSCodium is not installed at $exe. Run scripts/install-vscodium.ps1 first."
-}
-if (-not (Test-Path $Workspace)) {
-    throw "The folder does not exist: $Workspace"
-}
-
-$installed = Join-Path $env:USERPROFILE '.vscode-oss\extensions\lexiqode-1.0.0\out\extension.js'
-if ($Rebuild -or -not (Test-Path $installed)) {
-    Write-Host 'building and installing the extension...'
-    & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'install-extension.ps1')
-    if ($LASTEXITCODE -ne 0) { throw "installing the extension failed with exit code $LASTEXITCODE" }
-} else {
-    Write-Host 'the extension is already installed; pass -Rebuild to refresh it'
+    Write-Host "no LexiQode build at $Install" -ForegroundColor Yellow
+    Write-Host ''
+    Write-Host 'Get one either way:'
+    Write-Host '  download the CI artifact:  scripts\use-artifact.ps1 -Zip <path to LexiQode-win32-x64.zip>'
+    Write-Host '  or build it locally:       scripts\build-ide.ps1      (needs the C++ toolchain)'
+    throw 'the build is missing'
 }
 
-Write-Host ''
-Write-Host "starting VSCodium on $Workspace"
-Write-Host 'inside: open the LexiQode icon, then run "LexiQode: Set Up the Model Endpoint"'
-Write-Host ''
+$arguments = @()
+if ($Workspace -and (Test-Path $Workspace)) {
+    $arguments += $Workspace
+} elseif ($Workspace) {
+    Write-Host "the folder does not exist, starting without one: $Workspace" -ForegroundColor Yellow
+}
 
-# Detached on purpose: this script is a launcher, not a wrapper, so the terminal
-# stays usable while the editor runs.
-Start-Process -FilePath $exe -ArgumentList $Workspace | Out-Null
+if ($Wait) {
+    & $exe @arguments
+    return
+}
 
-Write-Host 'VSCodium started.'
+# Detached on purpose: this is a launcher, so the terminal stays usable.
+Start-Process -FilePath $exe -ArgumentList $arguments | Out-Null
+Write-Host "LexiQode started$(if ($arguments) { " on $Workspace" })"
+Write-Host 'The agent is in the right-hand side bar; Ctrl+Alt+L brings it back.'
