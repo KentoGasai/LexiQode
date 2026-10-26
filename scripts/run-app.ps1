@@ -65,13 +65,14 @@ $arguments = @()
 if ($Folder) { $arguments += (Resolve-Path $Folder).Path }
 
 function Start-FromSource {
-    # Splatting cannot be mixed with an inline list, so the entry point is part
-    # of the array.
+    # The application path has to come first: Electron reads the first
+    # non-switch argument as the application to run, so a folder passed before it
+    # becomes the app and Electron answers with an error dialog.
     $electron = Join-Path $app 'node_modules\electron\dist\electron.exe'
     if (-not (Test-Path $electron)) {
         throw 'the Electron binary is missing; run: cd app; npm install; node node_modules/electron/install.js'
     }
-    $splat = @($arguments + @('.'))
+    $splat = @(@('.') + $arguments)
     Push-Location $app
     try {
         & $electron @splat
@@ -87,11 +88,16 @@ if ($Source) {
     exit (Start-FromSource)
 }
 
-$executable = if ($Deploy -or (Test-Path (Join-Path $install 'LexiQode.exe'))) {
-    Join-Path $install 'LexiQode.exe'
-}
-else {
-    Find-Bundle
+# A bundle in dist/ wins over whatever is installed. The installed copy is the
+# older of the two by construction - it is only ever written by -Deploy - and
+# preferring it would start a build that no longer matches the sources, which is
+# exactly the confusion this script exists to prevent.
+$bundleExe = Find-Bundle
+$installedExe = Join-Path $install 'LexiQode.exe'
+$executable = if ($bundleExe) { $bundleExe } elseif (Test-Path $installedExe) { $installedExe } else { $null }
+
+if (-not $Deploy -and -not $Source -and -not $bundleExe -and (Test-Path $installedExe)) {
+    Write-Host "using the installed copy (no bundle in dist/): $installedExe"
 }
 
 if ($executable) {
