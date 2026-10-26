@@ -11,6 +11,7 @@
 
 import { clear, el, formatBytes, iconButton, toast } from './ui.js';
 import { t } from './i18n.js';
+import { menuPoint, openContextMenu } from './context-menu.js';
 
 const FILE_ICONS = [
   ['.js', 'js'], ['.mjs', 'js'], ['.cjs', 'js'], ['.ts', 'ts'], ['.tsx', 'ts'],
@@ -131,7 +132,10 @@ export function createExplorer({ api, onOpen, onNotice, activePath }) {
       );
       row.addEventListener('contextmenu', (event) => {
         event.preventDefault();
-        void handleContext(item);
+        // The container below has its own menu for empty space; a row must not
+        // open both.
+        event.stopPropagation();
+        openRowMenu(item, menuPoint(event));
       });
       container.append(row);
       if (item.directory && isOpen) {
@@ -152,34 +156,78 @@ export function createExplorer({ api, onOpen, onNotice, activePath }) {
     onOpen(item.path, event.altKey ? { beside: true } : {});
   }
 
-  async function handleContext(item) {
-    const choices = item.directory
-      ? [
-          { key: 'explorer.newFile', run: () => create('file', item.path) },
-          { key: 'explorer.newFolder', run: () => create('folder', item.path) },
-          { key: 'explorer.rename', run: () => rename(item.path, item.name) },
-          { key: 'explorer.reveal', run: () => api.workspace.reveal(item.path) },
-          { key: 'explorer.delete', run: () => remove(item.path) }
-        ]
-      : [
-          { key: 'explorer.open', run: () => onOpen(item.path) },
-          { key: 'explorer.rename', run: () => rename(item.path, item.name) },
-          { key: 'explorer.reveal', run: () => api.workspace.reveal(item.path) },
-          { key: 'explorer.delete', run: () => remove(item.path) }
-        ];
-    const answer = window.prompt(
-      `${t('explorer.chooseAction', { path: item.path })}\n\n${choices
-        .map((choice, index) => `${index + 1}. ${t(choice.key)}`)
-        .join('\n')}`,
-      '1'
-    );
-    const index = Number(answer);
-    if (!Number.isInteger(index) || index < 1 || index > choices.length) return;
+  /** The absolute path of a row, for the two "copy path" actions. */
+  function absolute(relative) {
+    const base = root ? root.root : '';
+    const separator = api.platform === 'win32' ? '\\' : '/';
+    return `${base}${separator}${String(relative).split('/').join(separator)}`;
+  }
+
+  async function copy(text, note) {
     try {
-      await choices[index - 1].run();
+      await api.clipboard.write(text);
+      onNotice?.(t(note, { value: text }));
     } catch (error) {
       toast('error', error.message);
     }
+  }
+
+  /**
+   * A right-click on a row: what can be done with this file or folder.
+   *
+   * Ordered the way the actions are used rather than the way they are
+   * implemented: open, look at it on disk, take its path, then the operations
+   * that change it, with the one that destroys something last and red.
+   */
+  function openRowMenu(item, point) {
+    const items = item.directory
+      ? [
+          { label: t('explorer.newFile'), run: () => create('file', item.path) },
+          { label: t('explorer.newFolder'), run: () => create('folder', item.path) },
+          { separator: true },
+          { label: t('explorer.reveal'), run: () => api.workspace.reveal(item.path) },
+          { label: t('explorer.copyPath'), run: () => copy(absolute(item.path), 'explorer.copiedPath') },
+          {
+            label: t('explorer.copyRelativePath'),
+            run: () => copy(item.path, 'explorer.copiedRelativePath')
+          },
+          { separator: true },
+          { label: t('explorer.rename'), run: () => rename(item.path, item.name) },
+          { label: t('explorer.delete'), danger: true, run: () => remove(item.path) }
+        ]
+      : [
+          { label: t('explorer.open'), run: () => onOpen(item.path) },
+          { label: t('explorer.openBeside'), run: () => onOpen(item.path, { beside: true }) },
+          { separator: true },
+          { label: t('explorer.reveal'), run: () => api.workspace.reveal(item.path) },
+          { label: t('explorer.copyPath'), run: () => copy(absolute(item.path), 'explorer.copiedPath') },
+          {
+            label: t('explorer.copyRelativePath'),
+            run: () => copy(item.path, 'explorer.copiedRelativePath')
+          },
+          { separator: true },
+          { label: t('explorer.rename'), run: () => rename(item.path, item.name) },
+          { label: t('explorer.delete'), danger: true, run: () => remove(item.path) }
+        ];
+    openContextMenu({ ...point, items, label: item.path });
+  }
+
+  /** A right-click on the empty part of the tree: about the folder itself. */
+  function openRootMenu(point) {
+    if (!root) return;
+    openContextMenu({
+      ...point,
+      label: root.root,
+      items: [
+        { label: t('explorer.newFile'), run: () => create('file', '') },
+        { label: t('explorer.newFolder'), run: () => create('folder', '') },
+        { separator: true },
+        { label: t('explorer.revealFolder'), run: () => api.workspace.reveal('') },
+        { label: t('explorer.copyPath'), run: () => copy(root.root, 'explorer.copiedPath') },
+        { separator: true },
+        { label: t('explorer.refresh'), run: () => refresh({ force: true }) }
+      ]
+    });
   }
 
   async function create(kind, parent = '') {
@@ -237,6 +285,18 @@ export function createExplorer({ api, onOpen, onNotice, activePath }) {
       row.dataset.active = String(row.dataset.path === currentActive);
     }
   }
+
+  /**
+   * The empty part of the sidebar: the folder itself, not a file in it.
+   *
+   * Bound to the container rather than to each drawing of the tree, because the
+   * tree is rebuilt on every refresh and a listener per render would accumulate.
+   */
+  host.addEventListener('contextmenu', (event) => {
+    event.preventDefault();
+    if (!event.target || event.target.closest('.tree__row')) return;
+    openRootMenu(menuPoint(event));
+  });
 
   /** Every file, for the quick-open picker. */
   async function files() {

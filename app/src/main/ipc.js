@@ -28,7 +28,20 @@ function wrap(handler) {
   };
 }
 
-function registerIpc({ ipcMain, dialog, shell, app, settings, workspace, search, git, terminal, agent, windowOf }) {
+function registerIpc({
+  ipcMain,
+  dialog,
+  shell,
+  app,
+  settings,
+  workspace,
+  search,
+  git,
+  terminal,
+  agent,
+  watcher,
+  windowOf
+}) {
   const handle = (channel, handler) => ipcMain.handle(channel, wrap(handler));
 
   // ---------------------------------------------------------------- window
@@ -87,6 +100,9 @@ function registerIpc({ ipcMain, dialog, shell, app, settings, workspace, search,
     if (!folder) return null;
     const result = await workspace.open(folder);
     settings.rememberFolder(result.root);
+    // The folder is watched from the moment it is open, so a file created by a
+    // build, a checkout or the agent appears in the tree without a Refresh.
+    watcher.watch(result.root);
     // The agent belongs to the folder it was started in, so a new folder means a
     // new core. Failures are reported through the agent status the panel already
     // shows, rather than failing the folder switch itself.
@@ -94,6 +110,7 @@ function registerIpc({ ipcMain, dialog, shell, app, settings, workspace, search,
     return result;
   });
   handle(CHANNELS.workspace.close, () => {
+    watcher.stop();
     workspace.close();
     // A core left running would keep working in a folder the window no longer
     // shows.
@@ -162,6 +179,13 @@ function registerIpc({ ipcMain, dialog, shell, app, settings, workspace, search,
   handle(CHANNELS.agent.send, (event, payload) => agent.send(payload));
   handle(CHANNELS.agent.cancel, () => agent.cancel());
   handle(CHANNELS.agent.reset, () => agent.reset());
+  handle(CHANNELS.agent.conversations, () => agent.conversations());
+  handle(CHANNELS.agent.conversationNew, () => agent.newConversation());
+  handle(CHANNELS.agent.conversationOpen, (event, id) => agent.openConversation(id));
+  handle(CHANNELS.agent.conversationRename, (event, payload) =>
+    agent.renameConversation(payload.id, payload.title)
+  );
+  handle(CHANNELS.agent.conversationDelete, (event, id) => agent.deleteConversation(id));
   handle(CHANNELS.agent.approval, (event, payload) => agent.approval(payload));
   handle(CHANNELS.agent.models, (event, payload) => agent.models(payload || {}));
   handle(CHANNELS.agent.saveProfile, (event, patch) => agent.saveProfile(patch));
@@ -180,6 +204,18 @@ function registerIpc({ ipcMain, dialog, shell, app, settings, workspace, search,
     const target = String(url || '');
     if (!/^https?:\/\//i.test(target)) throw new Error('only http and https links can be opened');
     return shell.openExternal(target);
+  });
+
+  /**
+   * Put text on the system clipboard.
+   *
+   * Through the main process rather than `navigator.clipboard`, which needs a
+   * secure context: the window is loaded from `app://`, so the browser API is
+   * either absent or refuses without a permission prompt nobody can answer.
+   */
+  handle(CHANNELS.clipboard.write, (event, text) => {
+    clipboard.writeText(String(text ?? ''));
+    return true;
   });
   handle(CHANNELS.shell.showItem, (event, target) => {
     shell.showItemInFolder(String(target || ''));

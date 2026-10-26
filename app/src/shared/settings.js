@@ -124,6 +124,13 @@ function sanitise(settings) {
   if (typeof result.session.folder !== 'string') result.session.folder = '';
   if (!Array.isArray(result.session.tabs)) result.session.tabs = [];
   if (typeof result.session.active !== 'string') result.session.active = '';
+  // Open assistant chats: ids, not transcripts, so a stale entry costs a tab
+  // that closes itself when the core says the conversation is gone.
+  if (!Array.isArray(result.session.chats)) result.session.chats = [];
+  result.session.chats = result.session.chats
+    .filter((id) => typeof id === 'string' && id)
+    .slice(0, 12);
+  if (typeof result.session.activeChat !== 'string') result.session.activeChat = '';
   return result;
 }
 

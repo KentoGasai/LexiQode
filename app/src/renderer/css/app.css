@@ -1374,6 +1374,149 @@ kbd {
   color: var(--warn);
 }
 
+/*
+ * The chats open in the assistant panel.
+ *
+ * A row always available above the transcript, because a chat is now something
+ * the user has several of. It scrolls sideways rather than wrapping: a strip that
+ * grows in height with every chat moves the conversation down the panel.
+ */
+.chattabs {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 4px 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.chattabs:empty {
+  display: none;
+}
+
+.chattab {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 190px;
+  padding: 3px 4px 3px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.chattab:hover {
+  background: var(--surface-2);
+}
+
+.chattab--active {
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.chattab__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chattab__close {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-faint);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.chattab__close:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.chattabs__add {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-faint);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.chattabs__add:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+/* The right-click menu. Positioned by its own script, above every panel. */
+.ctxmenu {
+  position: fixed;
+  z-index: 60;
+  min-width: 180px;
+  max-width: 340px;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow);
+}
+
+.ctxmenu__item {
+  display: block;
+  width: 100%;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.ctxmenu__item:hover,
+.ctxmenu__item:focus-visible {
+  background: var(--accent-soft);
+  outline: none;
+}
+
+.ctxmenu__item--danger {
+  color: var(--danger);
+}
+
+.ctxmenu__item[disabled] {
+  color: var(--text-faint);
+  cursor: default;
+}
+
+.ctxmenu__separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
+}
+
 .tools__head::-webkit-details-marker,
 .toolrow__head::-webkit-details-marker,
 .reasoning__head::-webkit-details-marker {

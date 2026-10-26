@@ -177,6 +177,34 @@ class AgentService {
     return this.#require().post('/api/reset');
   }
 
+  /** Every saved chat of this folder, and which one is open. */
+  async conversations() {
+    await this.ensureStarted();
+    return this.#require().get('/api/conversations');
+  }
+
+  /** Start an empty chat: the previous one stays saved. */
+  async newConversation() {
+    await this.ensureStarted();
+    return this.#require().post('/api/conversations/new');
+  }
+
+  /** Make one saved chat the open one, and answer with its messages. */
+  async openConversation(id) {
+    await this.ensureStarted();
+    return this.#require().post('/api/conversations/open', { id });
+  }
+
+  async renameConversation(id, title) {
+    await this.ensureStarted();
+    return this.#require().post('/api/conversations/rename', { id, title });
+  }
+
+  async deleteConversation(id) {
+    await this.ensureStarted();
+    return this.#require().post('/api/conversations/delete', { id });
+  }
+
   async approval({ requestId, approved, reason }) {
     // The field is named `id` by the core's route, not `request_id`; sending the
     // other name produced a 400 that looked like the approval had been ignored.

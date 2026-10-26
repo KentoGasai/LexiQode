@@ -77,6 +77,9 @@
             <span class="chat__state" id="chat-state" data-state="off"></span>
             <div class="pane__actions" id="chat-actions"></div>
           </div>
+          <!-- One tab per open chat. The chats themselves live in the core; this
+               strip only says which of them are open. -->
+          <div class="chattabs" id="chat-tabs" role="tablist"></div>
           <div class="transcript" id="transcript"></div>
           <div class="composer" id="composer">
             <div class="composer__context" id="composer-context"></div>

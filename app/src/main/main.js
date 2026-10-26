@@ -9,7 +9,7 @@
  * renderer receives everything through the one preload surface it was given.
  */
 
-const { app, BrowserWindow, Menu, nativeTheme, shell, dialog } = require('electron');
+const { app, BrowserWindow, Menu, nativeTheme, shell, dialog, clipboard } = require('electron');
 const path = require('node:path');
 
 const { CHANNELS, PRODUCT } = require('../shared/constants');
@@ -23,6 +23,7 @@ const { SearchService } = require('./search-service');
 const { GitService } = require('./git-service');
 const { TerminalService } = require('./terminal-service');
 const { AgentService } = require('./agent/service');
+const { createWorkspaceWatcher, ignoreFactory } = require('./workspace-watcher');
 
 // Must happen before the app is ready; afterwards Electron ignores it.
 registerScheme();
@@ -93,6 +94,19 @@ function buildServices() {
     onLog: (line) => console.log(`[agent] ${line}`)
   });
 
+  // The folder is watched here rather than by the window, because the window has
+  // no filesystem and the events have to survive a hidden window: the agent
+  // writes files while the panel is in the background, and the tree is expected
+  // to be right when it comes back.
+  const watcher = createWorkspaceWatcher({
+    shouldIgnore: ignoreFactory(settings.get().files.exclude),
+    onChanged: (payload) => send(CHANNELS.workspace.filesChanged, payload),
+    onProblem: (message) => {
+      console.log(`[workspace] ${message}`);
+      send(CHANNELS.workspace.filesChanged, { root: '', paths: [], problem: message });
+    }
+  });
+
   let lastLanguage = settings.get().appearance.language;
   settings.onChange((value) => {
     send(CHANNELS.settings.changed, value);
@@ -105,7 +119,11 @@ function buildServices() {
   });
   workspace.onChange((value) => send(CHANNELS.workspace.changed, value));
 
-  services = { settings, workspace, search, git, terminal, agent, send };
+  // A settings change can add or remove an excluded folder, and the watcher's
+  // filter is built from that list.
+  settings.onChange((value) => watcher.setIgnore(ignoreFactory(value.files ? value.files.exclude : [])));
+
+  services = { settings, workspace, search, git, terminal, agent, watcher, send };
   return services;
 }
 
@@ -285,6 +303,7 @@ function createWindow() {
   registerIpc({
     ipcMain: require('electron').ipcMain,
     app,
+    clipboard,
     dialog,
     shell,
     settings,
@@ -293,6 +312,7 @@ function createWindow() {
     git,
     terminal,
     agent,
+    watcher: services.watcher,
     windowOf: () => mainWindow
   });
 
@@ -329,6 +349,11 @@ if (!app.requestSingleInstanceLock()) {
     // One process to end and a handful of shells; both have to go, or the next
     // start finds an orphan holding the port.
     try {
+      services?.watcher.stop();
+    } catch {
+      // Nothing was watched.
+    }
+    try {
       services?.terminal.killAll();
     } catch {
       // Nothing was open.
@@ -349,7 +374,12 @@ if (!app.requestSingleInstanceLock()) {
         ? sessionFolder
         : null;
     const target = fromArgv || restore;
-    if (target) await workspace.open(target).catch(() => {});
+    if (target) {
+      await workspace.open(target).catch(() => {});
+      // A folder opened at start is watched like one opened from the window, or
+      // the tree would be stale until the first manual refresh.
+      if (workspace.current()) services.watcher.watch(workspace.current().root);
+    }
     createWindow();
     // The core is created for one folder; without one it would run in whatever
     // directory the window was launched from.

@@ -34,6 +34,7 @@ import { clear, debounce, el, icon, toast } from './ui.js';
 import { renderMarkdown } from './markdown.js';
 import { agentStateKey, current as i18nInfo, t } from './i18n.js';
 import { describeArguments, formatTokens } from './tool-arguments.js';
+import { menuPoint, openContextMenu } from './context-menu.js';
 
 /**
  * The marker the core puts on the message that replaces a summarised part of a
@@ -84,11 +85,19 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
   const dot = document.getElementById('chat-dot');
   const stateLabel = document.getElementById('chat-state');
   const actions = document.getElementById('chat-actions');
+  const tabsHost = document.getElementById('chat-tabs');
 
   const state = {
     modes: knownModes(),
     mode: 'agent',
     agent: { state: 'stopped', detail: '' },
+    /** Open chats, in the order they were opened. */
+    tabs: [],
+    /** Every saved chat of this folder, newest first. */
+    conversations: [],
+    activeChat: '',
+    /** Which chat the core itself has open, so a switch is not sent twice. */
+    coreChat: '',
     running: false,
     current: null,
     reasoning: null,
@@ -420,6 +429,235 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
     sendButton.textContent = state.running ? t('chat.working') : t('chat.send');
   }
 
+  // ------------------------------------------------------------- the chats
+
+  /**
+   * One tab per open chat.
+   *
+   * A chat is a document in the core with an id of its own; this strip only says
+   * which documents are open. That is why closing a tab deletes nothing and why
+   * reopening the window restores the same set - and why "new conversation" now
+   * means a new chat rather than the end of the one that was open. What used to
+   * happen: the transcript was cleared, the agent was reset, and the previous
+   * conversation could not be found anywhere afterwards.
+   */
+  function titleOf(id) {
+    const row = state.conversations.find((entry) => entry.id === id);
+    return (row && row.title) || t('chat.untitled');
+  }
+
+  function renderTabs() {
+    if (!tabsHost) return;
+    clear(tabsHost);
+    for (const tab of state.tabs) {
+      const active = tab.id === state.activeChat;
+      const node = el('div', {
+        class: `chattab${active ? ' chattab--active' : ''}`,
+        dataset: { id: tab.id },
+        role: 'tab',
+        'aria-selected': String(active),
+        title: tab.title || titleOf(tab.id),
+        onclick: () => void openChat(tab.id)
+      });
+      node.append(
+        el('span', { class: 'chattab__label', text: tab.title || titleOf(tab.id) }),
+        el('button', {
+          class: 'chattab__close',
+          type: 'button',
+          text: '×',
+          title: t('chat.closeTab'),
+          'aria-label': t('chat.closeTab'),
+          onclick: (event) => {
+            event.stopPropagation();
+            closeTab(tab.id);
+          }
+        })
+      );
+      node.addEventListener('contextmenu', (event) => {
+        event.preventDefault();
+        openContextMenu({
+          ...menuPoint(event),
+          label: tab.title || titleOf(tab.id),
+          items: [
+            { label: t('chat.renameChat'), run: () => renameChat(tab.id) },
+            { label: t('chat.deleteChat'), danger: true, run: () => deleteChat(tab.id) },
+            { separator: true },
+            { label: t('chat.closeTab'), run: () => closeTab(tab.id) }
+          ]
+        });
+      });
+      tabsHost.append(node);
+    }
+    tabsHost.append(
+      el('button', {
+        class: 'chattabs__add',
+        type: 'button',
+        text: '+',
+        title: t('chat.newTab'),
+        'aria-label': t('chat.newTab'),
+        onclick: () => void newChat()
+      }),
+      el('button', {
+        class: 'chattabs__add',
+        type: 'button',
+        text: '≡',
+        title: t('chat.history'),
+        'aria-label': t('chat.history'),
+        onclick: (event) => {
+          event.stopPropagation();
+          openChatMenu(event);
+        }
+      })
+    );
+  }
+
+  /** Every saved chat, and what can be done with the open one. */
+  function openChatMenu(event) {
+    const items = state.conversations.length
+      ? state.conversations.slice(0, 20).map((row) => ({
+          label: `${row.title || t('chat.untitled')} · ${row.messages}`,
+          run: () => openChat(row.id)
+        }))
+      : [{ label: t('chat.noSavedChats'), disabled: true }];
+    items.push({ separator: true });
+    items.push({ label: t('chat.newTab'), run: () => newChat() });
+    openContextMenu({ ...menuPoint(event), label: t('chat.history'), items });
+  }
+
+  async function refreshConversations() {
+    try {
+      const snapshot = await api.agent.conversations();
+      state.conversations = (snapshot && snapshot.conversations) || [];
+      if (snapshot && snapshot.current && snapshot.current.id) {
+        state.coreChat = snapshot.current.id;
+      }
+    } catch {
+      // The panel keeps the list it has: a core that is starting up answers the
+      // next call, and an empty strip would look like lost chats.
+    }
+    renderTabs();
+  }
+
+  function persistChats() {
+    void api.settings
+      .update({ session: { chats: state.tabs.map((tab) => tab.id), activeChat: state.activeChat } })
+      .catch(() => {});
+  }
+
+  /** Make one chat the open one, loading its transcript from the core. */
+  async function openChat(id) {
+    if (!id) return;
+    const known = state.tabs.some((tab) => tab.id === id);
+    if (!known) state.tabs.push({ id, title: titleOf(id) });
+    state.activeChat = id;
+    renderTabs();
+    try {
+      if (state.coreChat !== id) {
+        await api.agent.openConversation(id);
+        state.coreChat = id;
+      }
+      clear(transcript);
+      state.current = null;
+      state.reasoning = null;
+      state.tools.clear();
+      state.approvals.clear();
+      state.context = null;
+      await loadHistory();
+      await loadState();
+      renderContext();
+    } catch (error) {
+      toast('error', error.message);
+      await refreshConversations();
+    }
+    persistChats();
+  }
+
+  /** A new chat in a new tab. The one that was open stays where it is. */
+  async function newChat() {
+    try {
+      const created = await api.agent.newConversation();
+      const id = created && created.conversation ? created.conversation.id : '';
+      if (!id) throw new Error('the core did not name the new conversation');
+      state.coreChat = id;
+      state.tabs.push({ id, title: t('chat.untitled') });
+      state.activeChat = id;
+      clear(transcript);
+      state.current = null;
+      state.reasoning = null;
+      state.tools.clear();
+      state.context = null;
+      renderTabs();
+      renderContext();
+      await refreshConversations();
+      input.focus();
+      onNotice?.(t('chat.newStarted'), 'ok');
+    } catch (error) {
+      toast('error', error.message);
+    }
+  }
+
+  /** Close a tab. The chat itself stays saved and can be opened again. */
+  function closeTab(id) {
+    const index = state.tabs.findIndex((tab) => tab.id === id);
+    if (index === -1) return;
+    state.tabs.splice(index, 1);
+    if (state.activeChat !== id) {
+      renderTabs();
+      persistChats();
+      return;
+    }
+    const next = state.tabs[index] || state.tabs[index - 1] || null;
+    if (next) {
+      void openChat(next.id);
+      return;
+    }
+    // The last tab: the panel keeps the chat open but shows nothing to switch to,
+    // which is what `+` is for.
+    state.activeChat = state.coreChat || '';
+    renderTabs();
+    persistChats();
+  }
+
+  async function renameChat(id) {
+    const current = state.conversations.find((row) => row.id === id);
+    const name = window.prompt(t('chat.renamePrompt'), (current && current.title) || '');
+    if (!name) return;
+    try {
+      await api.agent.renameConversation(id, name);
+      await refreshConversations();
+      const tab = state.tabs.find((entry) => entry.id === id);
+      if (tab) tab.title = titleOf(id);
+      renderTabs();
+    } catch (error) {
+      toast('error', error.message);
+    }
+  }
+
+  async function deleteChat(id) {
+    const confirmed = await api.dialogs.confirm({
+      message: t('chat.deleteConfirm', { title: titleOf(id) }),
+      detail: t('chat.deleteDetail'),
+      danger: true,
+      confirmLabel: t('chat.deleteAction')
+    });
+    if (!confirmed) return;
+    try {
+      const result = await api.agent.deleteConversation(id);
+      state.tabs = state.tabs.filter((tab) => tab.id !== id);
+      state.activeChat = result && result.current ? result.current.id : '';
+      state.coreChat = state.activeChat;
+      await refreshConversations();
+      if (state.activeChat) await openChat(state.activeChat);
+      else {
+        clear(transcript);
+        state.current = null;
+      }
+      onNotice?.(t('chat.deleted'), 'ok');
+    } catch (error) {
+      toast('error', error.message);
+    }
+  }
+
   function handleEvent(event) {
     const data = event.data || {};
     switch (event.name) {
@@ -478,6 +716,20 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
             dropped: data.dropped || 0
           })
         );
+        break;
+      }
+      case 'conversation_changed': {
+        // The core names a chat once it has a question in it, and reports a
+        // rename from anywhere else in the window. The tab strip follows.
+        if (data.id === undefined) break;
+        if (data.deleted) {
+          state.tabs = state.tabs.filter((tab) => tab.id !== data.id);
+        } else if (data.title) {
+          const tab = state.tabs.find((entry) => entry.id === data.id);
+          if (tab) tab.title = data.title;
+        }
+        renderTabs();
+        void refreshConversations();
         break;
       }
       case 'turn_end': {
@@ -728,21 +980,10 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
   }
 
   async function reset() {
-    try {
-      await api.agent.reset();
-    } catch (error) {
-      toast('error', error.message);
-    }
-    clear(transcript);
-    state.current = null;
-    state.reasoning = null;
-    state.tools.clear();
-    state.approvals.clear();
-    // A new conversation starts with an almost empty window, and a gauge still
-    // showing the old one would be the first lie the panel tells.
-    state.context = null;
-    renderContext();
-    onNotice?.(t('chat.newStarted'), 'ok');
+    // Every way of starting a chat comes through here: the header button, the
+    // keyboard chord and the command palette. It opens a tab, because the chat
+    // that was open is still there to go back to.
+    await newChat();
   }
 
   // ------------------------------------------------------- agent settings
@@ -947,6 +1188,27 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
     }
     language.value = settings().appearance.language;
 
+    /**
+     * The window's theme, next to its language.
+     *
+     * Both are window settings rather than agent settings, and this is the only
+     * settings surface the window has. Until now the only way to change the theme
+     * was the command palette, which is why a machine whose system theme is light
+     * had no discoverable way to reach the dark one.
+     */
+    const theme = el('select', {
+      class: 'langpick',
+      onchange: () => void api.settings.update({ appearance: { theme: theme.value } }).catch(() => {})
+    });
+    for (const [value, key] of [
+      ['system', 'settings.themeSystem'],
+      ['dark', 'settings.themeDark'],
+      ['light', 'settings.themeLight']
+    ]) {
+      theme.append(el('option', { value, text: t(key) }));
+    }
+    theme.value = settings().appearance.theme;
+
     const sheet = el('div', { class: 'commit' }, [
       el('div', { class: 'turn__who' }, [el('span', { class: 'turn__role', text: t('settings.title') })]),
       field(t('settings.profile'), id),
@@ -959,6 +1221,7 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
       field(t('settings.maxSteps'), maxSteps),
       field(t('settings.commandTimeout'), commandTimeout),
       field(t('settings.language'), language),
+      field(t('settings.theme'), theme),
       el('div', { class: 'field__row' }, [
         el('label', {}, [autoApprove, el('span', { text: t('settings.autoApprove') })]),
         el('label', {}, [approveWrites, el('span', { text: t('settings.askWrites') })]),
@@ -1120,6 +1383,29 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
     if (payload && payload.name) handleEvent(payload);
   });
 
+  /**
+   * Restore the tabs that were open, and open the one that was active.
+   *
+   * The ids come from the window's own settings and the chats themselves from
+   * the core, so an id that no longer exists is dropped rather than shown as a
+   * tab that opens nothing.
+   */
+  async function restoreTabs() {
+    await refreshConversations();
+    const known = new Set(state.conversations.map((row) => row.id));
+    const saved = (settings().session && settings().session.chats) || [];
+    state.tabs = saved.filter((id) => known.has(id)).map((id) => ({ id, title: titleOf(id) }));
+
+    const core = state.coreChat;
+    const wanted = (settings().session && settings().session.activeChat) || '';
+    const active = wanted && known.has(wanted) ? wanted : core;
+    if (active && !state.tabs.some((tab) => tab.id === active)) {
+      state.tabs.unshift({ id: active, title: titleOf(active) });
+    }
+    renderTabs();
+    if (active && active !== core) await openChat(active);
+  }
+
   async function mount() {
     clear(actions);
     actions.append(
@@ -1151,6 +1437,7 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
     renderRunning();
     await loadState();
     await loadHistory();
+    await restoreTabs();
     grow();
   }
 
@@ -1169,9 +1456,13 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
     state.approvals.clear();
     state.modeOpen = false;
     hideModePopup();
+    state.tabs = [];
+    state.activeChat = '';
+    state.coreChat = '';
     await refreshStatus();
     await loadState();
     await loadHistory();
+    await restoreTabs();
     renderContext();
     renderRunning();
     grow();

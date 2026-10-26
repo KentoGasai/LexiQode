@@ -23,6 +23,7 @@ const { CHANNELS } = require('../shared/constants');
 const EVENTS = [
   CHANNELS.window.state,
   CHANNELS.workspace.changed,
+  CHANNELS.workspace.filesChanged,
   CHANNELS.settings.changed,
   CHANNELS.search.batch,
   CHANNELS.search.done,
@@ -116,6 +117,11 @@ const api = {
     send: (payload) => call(CHANNELS.agent.send, payload),
     cancel: () => call(CHANNELS.agent.cancel),
     reset: () => call(CHANNELS.agent.reset),
+    conversations: () => call(CHANNELS.agent.conversations),
+    newConversation: () => call(CHANNELS.agent.conversationNew),
+    openConversation: (id) => call(CHANNELS.agent.conversationOpen, id),
+    renameConversation: (id, title) => call(CHANNELS.agent.conversationRename, { id, title }),
+    deleteConversation: (id) => call(CHANNELS.agent.conversationDelete, id),
     approval: (payload) => call(CHANNELS.agent.approval, payload),
     models: (payload) => call(CHANNELS.agent.models, payload),
     saveProfile: (patch) => call(CHANNELS.agent.saveProfile, patch),
@@ -124,6 +130,9 @@ const api = {
   shell: {
     openExternal: (url) => call(CHANNELS.shell.openExternal, url),
     showItem: (target) => call(CHANNELS.shell.showItem, target)
+  },
+  clipboard: {
+    write: (text) => call(CHANNELS.clipboard.write, text)
   }
 };
 

@@ -38,7 +38,14 @@ const CHANNELS = {
     remove: 'workspace:remove',
     reveal: 'workspace:reveal',
     index: 'workspace:index',
-    changed: 'workspace:changed'
+    changed: 'workspace:changed',
+    /**
+     * Something inside the open folder changed on disk. Distinct from
+     * `changed`, which means the *folder* changed and makes the window close its
+     * editors: a file written by a build, a `git checkout` or the agent must
+     * update the tree without throwing away what the user has open.
+     */
+    filesChanged: 'workspace:files-changed'
   },
   search: {
     start: 'search:start',
@@ -86,12 +93,25 @@ const CHANNELS = {
     models: 'agent:models',
     saveProfile: 'agent:save-profile',
     complete: 'agent:complete',
+    /**
+     * Saved chats. A conversation is a file in the core, so the window asks it
+     * what exists instead of keeping its own list - which is what makes a chat
+     * survive closing the window, and reopening the folder.
+     */
+    conversations: 'agent:conversations',
+    conversationNew: 'agent:conversation-new',
+    conversationOpen: 'agent:conversation-open',
+    conversationRename: 'agent:conversation-rename',
+    conversationDelete: 'agent:conversation-delete',
     event: 'agent:event',
     statusChanged: 'agent:status-changed'
   },
   shell: {
     openExternal: 'shell:open-external',
     showItem: 'shell:show-item'
+  },
+  clipboard: {
+    write: 'clipboard:write'
   },
   /** Main-process to renderer: menu items and keyboard accelerators arrive here. */
   app: { command: 'app:command', i18n: 'app:i18n' }
@@ -168,7 +188,12 @@ const DEFAULTS = {
     includeSelection: true
   },
   recent: [],
-  session: { folder: '', tabs: [], active: '' }
+  /**
+   * What to restore on the next start. `chats` and `activeChat` are the open
+   * assistant tabs: ids of conversations that live in the core, so the window
+   * only remembers which ones were open, not what was said in them.
+   */
+  session: { folder: '', tabs: [], active: '', chats: [], activeChat: '' }
 };
 
 module.exports = { PRODUCT, CHANNELS, FALLBACK_MODES, DEFAULTS };

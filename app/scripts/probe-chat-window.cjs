@@ -385,6 +385,108 @@ async function main() {
       const modelItem = document.querySelector('.statusbar__item[data-role="model"]');
       steps.turn.statusbarModel = modelItem ? modelItem.textContent.trim() : '(no model item)';
       steps.turn.statusbar = statusbar();
+
+      // ---------------------------------------------------------------- chats
+      // A chat is a document in the core: a second one opens in a second tab, the
+      // first stays where it was, and switching back restores its transcript.
+      const tabs = () =>
+        [...document.querySelectorAll('#chat-tabs .chattab')].map((tab) => ({
+          id: tab.dataset.id,
+          label: (tab.querySelector('.chattab__label') || {}).textContent || '',
+          active: tab.classList.contains('chattab--active')
+        }));
+      const savedChats = async () => {
+        const listed = await window.lexiqode.agent.conversations();
+        return {
+          current: listed.current,
+          conversations: listed.conversations.map((row) => ({
+            id: row.id,
+            title: row.title,
+            messages: row.messages
+          }))
+        };
+      };
+      steps.chatsBefore = { tabs: tabs(), ...(await savedChats()) };
+
+      const addTab = document.querySelector('#chat-tabs .chattabs__add');
+      if (addTab) addTab.click();
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        await sleep(250);
+        if (tabs().length === 2 && !document.getElementById('transcript').textContent.trim()) break;
+      }
+      steps.afterNewChat = {
+        tabs: tabs(),
+        transcriptEmpty: !document.getElementById('transcript').textContent.trim(),
+        ...(await savedChats())
+      };
+
+      const firstTab = document.querySelector('#chat-tabs .chattab');
+      if (firstTab) firstTab.click();
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        await sleep(250);
+        if (/stub answered/i.test(document.getElementById('transcript').textContent)) break;
+      }
+      const prefs = await window.lexiqode.settings.get();
+      steps.afterSwitchingBack = {
+        tabs: tabs(),
+        previousAnswerRestored: /stub answered/i.test(document.getElementById('transcript').textContent),
+        savedInSettings: (prefs.session && prefs.session.chats) || [],
+        activeInSettings: (prefs.session && prefs.session.activeChat) || ''
+      };
+
+      // ------------------------------------------------- the file context menu
+      // The right-click menu is drawn by the window, not by a browser prompt.
+      const row = document.querySelector('.tree__row');
+      if (row) {
+        row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 60, clientY: 80 }));
+        await sleep(250);
+        const menu = document.querySelector('.ctxmenu');
+        steps.contextMenu = {
+          present: Boolean(menu),
+          items: menu
+            ? [...menu.querySelectorAll('.ctxmenu__item')].map((item) => item.textContent.trim())
+            : [],
+          hasReveal: menu
+            ? [...menu.querySelectorAll('.ctxmenu__item')].some((item) =>
+                /проводник|Explorer/i.test(item.textContent)
+              )
+            : false
+        };
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+        await sleep(150);
+        steps.contextMenu.closedWithEscape = !document.querySelector('.ctxmenu');
+      }
+
+      // The theme is switchable from the window, not only from the command
+      // palette: the form has a selector, and choosing from it repaints the
+      // document while the form is still open.
+      const themeBefore = document.documentElement.dataset.theme;
+      await openForm();
+      await sleep(300);
+      const selects = [...document.querySelectorAll('#transcript .commit select.langpick')];
+      const themeSelect = selects[1];
+      steps.theme = {
+        before: themeBefore,
+        selectors: selects.length,
+        options: themeSelect ? [...themeSelect.options].map((option) => option.value) : [],
+        labels: themeSelect ? [...themeSelect.options].map((option) => option.textContent.trim()) : []
+      };
+      if (themeSelect) {
+        const wanted = themeBefore === 'dark' ? 'light' : 'dark';
+        themeSelect.value = wanted;
+        themeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+          await sleep(150);
+          if (document.documentElement.dataset.theme === wanted) break;
+        }
+        steps.theme.wanted = wanted;
+        steps.theme.afterChoosing = document.documentElement.dataset.theme;
+        // Put the window back the way it was found.
+        themeSelect.value = themeBefore;
+        themeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+        await sleep(300);
+      }
+      await closeForm();
       return steps;
     `);
 

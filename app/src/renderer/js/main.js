@@ -65,6 +65,20 @@ const persistSession = debounce(() => {
   persist({ session: { folder: workspace ? workspace.root : '', ...editor.session() } });
 }, 600);
 
+/**
+ * Re-read what a change on disk could have affected.
+ *
+ * Debounced, because a build or a checkout produces hundreds of events in a
+ * second and each redraw re-reads the visible part of the tree. The git panel is
+ * refreshed only while it is the panel on screen: `git status` is a process, and
+ * running one for a background tab is work nobody asked for.
+ */
+const refreshAfterDiskChange = debounce(() => {
+  if (!workspace) return;
+  void Promise.resolve(explorer?.refresh({ force: true })).catch(() => {});
+  if (currentActivity === 'git' && git) void git.refresh().catch(() => {});
+}, 250);
+
 function settings() {
   return settingsValue;
 }
@@ -99,6 +113,7 @@ const CH = {
   terminalExit: 'terminal:exit',
   settingsChanged: 'settings:changed',
   workspaceChanged: 'workspace:changed',
+  workspaceFilesChanged: 'workspace:files-changed',
   windowState: 'window:state'
 };
 
@@ -847,6 +862,23 @@ function wireEvents() {
   api.on(CH.searchDone, (payload) => bus.emit('search:done', payload));
   api.on(CH.terminalData, (payload) => bus.emit('terminal:data', payload));
   api.on(CH.terminalExit, (payload) => bus.emit('terminal:exit', payload));
+  /**
+   * Something inside the folder changed on disk.
+   *
+   * The main process watches the folder, because the window has no filesystem
+   * and because a build, a `git checkout` or the agent writing through the core
+   * all happen outside this process. The tree is re-read, and a problem with the
+   * watch itself is said out loud once rather than leaving a tree that quietly
+   * stops updating.
+   */
+  api.on(CH.workspaceFilesChanged, (payload) => {
+    const changed = payload || {};
+    if (changed.problem) {
+      toast('warn', changed.problem);
+      return;
+    }
+    void refreshAfterDiskChange();
+  });
   api.on(CH.agentEvent, (payload) => {
     bus.emit('agent:event', payload);
     // A finished turn is when the agent may have written files, and none of
