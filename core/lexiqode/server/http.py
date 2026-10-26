@@ -39,6 +39,34 @@ SSE_HEARTBEAT_SECONDS = 15.0
 SSE_QUEUE_DEPTH = 2000
 
 
+def _coerce_setting(default: Any, value: Any) -> Any:
+    """Bring one settings value to the type its field declares.
+
+    The editor is not the only client of this route, and JSON has no integer
+    versus string distinction once a number has been quoted. A ``context_window``
+    stored as ``"128000"`` does not fail here - it fails inside the loop's
+    arithmetic, which reads as the agent breaking rather than as a bad settings
+    write, so the conversion happens where the mistake was made. An unparsable
+    value keeps the default instead of poisoning the profile with a string.
+    """
+
+    if isinstance(default, bool):
+        return value if isinstance(value, bool) else str(value).strip().lower() == "true"
+    if isinstance(default, int):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+    if isinstance(default, float):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+    if isinstance(default, str):
+        return value if isinstance(value, str) else str(value)
+    return value
+
+
 class _SseSubscriber:
     """Fan-out buffer for one connected editor."""
 
@@ -348,7 +376,7 @@ class _RequestHandler(BaseHTTPRequestHandler):
             for key, value in raw_agent.items():
                 if key not in AgentSettings.__slots__:
                     continue
-                setattr(settings.agent, key, value)
+                setattr(settings.agent, key, _coerce_setting(getattr(AgentSettings(), key), value))
 
         raw_profile = body.get("profile")
         if isinstance(raw_profile, dict):
@@ -357,7 +385,7 @@ class _RequestHandler(BaseHTTPRequestHandler):
             payload = asdict(current)
             for key, value in raw_profile.items():
                 if key in ModelProfile.__slots__ and value is not None:
-                    payload[key] = value
+                    payload[key] = _coerce_setting(getattr(ModelProfile(id="_"), key), value)
             payload["id"] = profile_id
             settings.set_profile(ModelProfile(**payload))
 

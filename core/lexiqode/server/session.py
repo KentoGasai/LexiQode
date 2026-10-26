@@ -366,6 +366,11 @@ class CoreSession:
                 "approve_writes": self.settings.agent.approve_writes,
                 "approve_commands": self.settings.agent.approve_commands,
                 "command_timeout": self.settings.agent.command_timeout,
+                # What the window is and when the conversation is compacted are
+                # numbers the user can see and change; the panel draws the gauge
+                # from them instead of guessing at a threshold.
+                "compact_at": self.settings.agent.compact_at,
+                "max_history_messages": self.settings.agent.max_history_messages,
             },
             "tools": self.registry.describe(),
             "modes": catalogue(),
@@ -379,6 +384,10 @@ class CoreSession:
             },
             "pending_approvals": self.approvals.pending,
             "history_length": len(self._loop.messages) if self._loop else 0,
+            # What the window looks like right now, so a window opened in the
+            # middle of a long conversation shows the gauge before the next turn
+            # rather than after it. Null until a loop exists.
+            "context": self._loop.context_usage() if self._loop else None,
             "protocol": PROTOCOL_VERSION,
             "version": __version__,
         }

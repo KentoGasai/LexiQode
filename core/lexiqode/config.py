@@ -165,6 +165,16 @@ class AgentSettings:
     max_read_lines: int = 400
     #: Characters a single tool result may contribute to the conversation.
     max_tool_output: int = 24_000
+    #: Fraction of the model's context window at which the conversation is
+    #: compacted instead of being sent whole. The window itself belongs to the
+    #: profile (``ModelProfile.context_window``), because it is a property of the
+    #: model and not of how the agent behaves; what belongs here is when to act
+    #: on it.
+    compact_at: float = 0.75
+    #: Hard ceiling on stored messages, whatever the window would allow. A
+    #: backstop for an endpoint whose tokens are far more expensive than the
+    #: four-characters-per-token estimate assumes.
+    max_history_messages: int = 60
 
 
 @dataclass(slots=True)

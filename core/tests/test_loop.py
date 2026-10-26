@@ -9,9 +9,11 @@ import unittest
 from pathlib import Path
 
 from lexiqode.agent.loop import AgentLoop
+from lexiqode.agent.loop import SUMMARY_MARKER, estimate_tokens
 from lexiqode.agent.tools.base import ApprovalDecision
 from lexiqode.agent.tools.registry import default_registry
 from lexiqode.config import AgentSettings, ModelProfile
+from lexiqode.errors import ProviderError
 from lexiqode.llm.types import Chunk, Usage
 
 from .fakes import FakeClient, text_chunks, tool_chunks
@@ -31,10 +33,19 @@ class LoopTestCase(unittest.TestCase):
         (self.workspace / "hello.txt").write_text("line one\nline two\n", encoding="utf-8")
         self.events: list[tuple[str, dict]] = []
 
-    def build(self, script, *, settings: AgentSettings | None = None, approve=None, **kwargs):
-        client = FakeClient(script)
+    def build(
+        self,
+        script,
+        *,
+        settings: AgentSettings | None = None,
+        approve=None,
+        profile: ModelProfile | None = None,
+        client=None,
+        **kwargs,
+    ):
+        client = client or FakeClient(script)
         loop = AgentLoop(
-            profile=make_profile(),
+            profile=profile or make_profile(),
             settings=settings or AgentSettings(auto_approve=True, max_steps=6),
             workspace=self.workspace,
             registry=default_registry(),
@@ -235,14 +246,26 @@ class LimitsTest(LoopTestCase):
         self.assertEqual(result.stopped, "cancelled")
 
     def test_history_trimming_never_orphans_a_tool_result(self) -> None:
-        script = []
-        for index in range(8):
-            script.append(tool_chunks("read_file", {"path": "hello.txt"}, call_id=f"c{index}"))
-            script.append(text_chunks(f"step {index}"))
-        loop, client = self.build(script, max_history_messages=5)
+        # Tool calls first and the answer last. A script of tool/text pairs used
+        # to end the turn at the first text reply, so the history never reached
+        # the ceiling and this test passed without testing the trimming at all.
+        script = [
+            tool_chunks("read_file", {"path": "hello.txt"}, call_id=f"c{index}")
+            for index in range(12)
+        ]
+        script.append(text_chunks("done"))
+        script.append(text_chunks("second turn"))
+        loop, client = self.build(
+            script,
+            settings=AgentSettings(auto_approve=True, max_steps=14, max_history_messages=10),
+        )
         loop.run("do a lot")
+        # The trim runs when the turn ends, so the trimmed history is what the
+        # next request sends - which is the payload that has to stay valid.
+        loop.run("again")
 
         roles = [message["role"] for message in client.last_messages[1:]]
+        self.assertLessEqual(len(roles), 11, "the ceiling should have dropped the oldest")
         for index, role in enumerate(roles):
             if role != "tool":
                 continue
@@ -255,6 +278,150 @@ class LimitsTest(LoopTestCase):
         self.assertTrue(loop.messages)
         loop.reset()
         self.assertEqual(loop.messages, [])
+
+
+class FailingSummaryClient(FakeClient):
+    """Answers everything, and refuses the quiet summarisation request.
+
+    The summary is the one call the loop makes with no tools, which is how this
+    recognises it without depending on the prompt's wording.
+    """
+
+    def stream(self, messages, tools=None, **kwargs):
+        if tools is None:
+            self.calls.append({"messages": list(messages), "tools": None})
+            raise ProviderError("the endpoint refused the summary", status=500)
+        return super().stream(messages, tools=tools, **kwargs)
+
+
+class ContextCompactionTest(LoopTestCase):
+    """The conversation is compacted instead of being sent until it overflows."""
+
+    #: 800 characters, about 200 tokens by the loop's own estimate: a realistic
+    #: message in a small window, and small enough that dropping the oldest one
+    #: genuinely buys room.
+    MESSAGE = 800
+
+    def small_window(self, script, *, window=2000, max_output=0, compact_at=0.5, **kwargs):
+        settings = AgentSettings(auto_approve=True, max_steps=4, compact_at=compact_at)
+        profile = make_profile(context_window=window, max_output_tokens=max_output)
+        return self.build(script, settings=settings, profile=profile, **kwargs)
+
+    def test_the_estimate_grows_with_the_text_and_the_tool_arguments(self) -> None:
+        small = estimate_tokens([{"role": "user", "content": "a" * 400}])
+        large = estimate_tokens([{"role": "user", "content": "a" * 8000}])
+        self.assertGreater(large, small)
+        with_call = estimate_tokens(
+            [
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {"function": {"name": "read_file", "arguments": "p" * 400}}
+                    ],
+                }
+            ]
+        )
+        self.assertGreater(with_call, estimate_tokens([{"role": "assistant", "content": ""}]))
+
+    def test_nothing_is_dropped_while_the_conversation_fits(self) -> None:
+        loop, client = self.small_window(
+            [text_chunks("one"), text_chunks("two"), text_chunks("three")],
+            window=100_000,
+        )
+        for message in ("one", "two", "three"):
+            loop.run(message)
+
+        self.assertNotIn("context_compacted", self.types())
+        self.assertEqual(len(loop.messages), 6)
+        self.assertNotIn(SUMMARY_MARKER, client.last_messages[1]["content"])
+
+    def test_a_full_window_is_summarised_by_the_model(self) -> None:
+        loop, client = self.small_window(
+            [
+                text_chunks("answer one"),
+                text_chunks("answer two"),
+                # The summary request, then the turn's own request.
+                text_chunks("summary of the earlier turns"),
+                text_chunks("the real answer"),
+            ]
+        )
+        loop.run("a" * self.MESSAGE)
+        loop.run("b" * self.MESSAGE)
+        result = loop.run("c" * self.MESSAGE)
+
+        self.assertEqual(result.text, "the real answer")
+        # Four requests for three turns: the third turn paid for a summary.
+        self.assertEqual(len(client.calls), 4)
+        self.assertIsNone(client.calls[2]["tools"], "the summary is asked without tools")
+        self.assertIn("summary of the earlier turns", result.messages[0]["content"])
+        self.assertTrue(result.messages[0]["content"].startswith(SUMMARY_MARKER))
+
+        prompt = client.calls[3]["messages"]
+        self.assertTrue(prompt[1]["content"].startswith(SUMMARY_MARKER))
+        self.assertIn("summary of the earlier turns", prompt[1]["content"])
+        sent = " ".join(str(m.get("content")) for m in prompt)
+        self.assertNotIn("a" * self.MESSAGE, sent, "the dropped part must not be sent")
+        self.assertIn("b" * self.MESSAGE, sent, "the newest part must be kept")
+
+        event = self.payload("context_compacted")
+        self.assertEqual(event["reason"], "window")
+        self.assertTrue(event["summarised"])
+        self.assertGreaterEqual(event["dropped"], 1)
+        self.assertGreater(event["tokens_before"], event["tokens_after"])
+        self.assertEqual(event["context_window"], 2000)
+        # The summary is housekeeping: it must never appear in the transcript the
+        # user watches, which is what a stray text_delta event would do.
+        self.assertFalse(
+            [
+                data
+                for event_type, data in self.events
+                if "summary of the earlier turns" in str(data.get("text", ""))
+            ]
+        )
+
+    def test_a_refused_summary_still_frees_the_window(self) -> None:
+        client = FailingSummaryClient(
+            [
+                text_chunks("answer one"),
+                text_chunks("answer two"),
+                text_chunks("the real answer"),
+            ]
+        )
+        loop, _ = self.small_window([], client=client)
+        loop.run("a" * self.MESSAGE)
+        loop.run("b" * self.MESSAGE)
+        result = loop.run("c" * self.MESSAGE)
+
+        self.assertEqual(result.text, "the real answer")
+        self.assertEqual(result.stopped, "completed")
+        event = self.payload("context_compacted")
+        self.assertFalse(event["summarised"])
+        self.assertEqual(event["reason"], "window")
+        note = result.messages[0]["content"]
+        self.assertTrue(note.startswith(SUMMARY_MARKER))
+        # The note says what was lost, so a surprising answer can be traced to it.
+        self.assertIn("could not be summarised", note)
+        self.assertNotIn("a" * self.MESSAGE, note)
+
+    def test_the_message_ceiling_drops_the_oldest_and_reports_it(self) -> None:
+        script = [
+            tool_chunks("read_file", {"path": "hello.txt"}, call_id=f"c{index}")
+            for index in range(8)
+        ]
+        script.append(text_chunks("done"))
+        loop, _ = self.build(
+            script,
+            settings=AgentSettings(auto_approve=True, max_steps=10, max_history_messages=10),
+        )
+        loop.run("do a lot")
+
+        event = self.payload("context_compacted")
+        self.assertEqual(event["reason"], "messages")
+        self.assertFalse(event["summarised"])
+        self.assertEqual(event["message_limit"], 10)
+        self.assertLessEqual(len(loop.messages), 10)
+        self.assertGreaterEqual(event["dropped"], 1)
 
 
 if __name__ == "__main__":

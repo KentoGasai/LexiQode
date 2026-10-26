@@ -158,6 +158,45 @@ class StateTest(ServerTestCase):
         response = self.post("/api/chat", {"message": "   "})
         self.assertEqual(response.status_code, 400)
 
+    def test_settings_numbers_arrive_as_numbers(self) -> None:
+        """A quoted number must not reach the loop as a string.
+
+        JSON has no integer type once a value has been written as ``"128000"``,
+        and the loop multiplies the context window by a fraction: a string there
+        stops the agent rather than the settings write, which reads as the agent
+        breaking for no reason the user can see.
+        """
+
+        response = httpx.put(
+            f"{self.base}/api/settings",
+            json={
+                "agent": {"compact_at": "0.5", "max_history_messages": "12"},
+                "profile": {"id": "test", "context_window": "64000", "max_output_tokens": "1024"},
+            },
+            headers=self.headers,
+            timeout=5.0,
+        )
+        self.assertEqual(response.status_code, 200)
+        settings = response.json()["settings"]
+        self.assertEqual(settings["agent"]["compact_at"], 0.5)
+        self.assertEqual(settings["agent"]["max_history_messages"], 12)
+        self.assertEqual(settings["profiles"]["test"]["context_window"], 64000)
+        self.assertEqual(settings["profiles"]["test"]["max_output_tokens"], 1024)
+        # And the state the panel draws its gauge from reports the same numbers.
+        state = self.get("/api/state").json()
+        self.assertEqual(state["profile"]["context_window"], 64000)
+        self.assertEqual(state["agent"]["compact_at"], 0.5)
+
+    def test_an_unparsable_number_keeps_the_default(self) -> None:
+        response = httpx.put(
+            f"{self.base}/api/settings",
+            json={"profile": {"id": "test", "context_window": "as much as you like"}},
+            headers=self.headers,
+            timeout=5.0,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["settings"]["profiles"]["test"]["context_window"], 128_000)
+
 
 class TurnTest(ServerTestCase):
     script = [text_chunks("Hello from the model.")]
