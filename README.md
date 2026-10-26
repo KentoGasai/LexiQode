@@ -3,6 +3,9 @@
 ![platform](https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0078d4)
 ![licence](https://img.shields.io/badge/licence-MIT-green)
 ![python](https://img.shields.io/badge/python-3.11%2B-3776ab)
+![release](https://img.shields.io/badge/release-0.2.0-blue)
+![protocol](https://img.shields.io/badge/core%20protocol-1-lightgrey)
+![проверки](https://img.shields.io/badge/тесты-162%20ядро%20%2F%20145%20окно-brightgreen)
 
 IDE для Windows со встроенным ИИ-ассистентом, который работает на **своём** адресе
 модели — подойдёт любой сервер, совместимый с OpenAI `/chat/completions`:
@@ -13,6 +16,26 @@ IDE для Windows со встроенным ИИ-ассистентом, кот
 пользователя, ассистент обращается только к указанному адресу.
 
 [English version](README.en.md)
+
+## Как это выглядит
+
+Снимки сделаны с самого приложения: скрипт `app/scripts/capture-screenshots.cjs`
+запускает окно, открывает демонстрационный проект во временной папке и снимает
+экран через DevTools — на них нет ни чужих путей, ни ключей.
+
+![Ассистент](docs/screenshots/ru-02-assistant.png)
+
+*Ассистент: рассуждения свёрнуты в строку над ответом, инструменты — одной строкой
+на ход, под полем ввода видно, сколько занято из окна модели.*
+
+| | |
+|---|---|
+| ![Редактор](docs/screenshots/ru-01-editor.png) | ![Поиск по файлам](docs/screenshots/05-search.png) |
+| Проводник и редактор | Поиск по всем файлам с результатами по мере поступления |
+| ![Контроль версий](docs/screenshots/06-source-control.png) | ![Меню файла](docs/screenshots/04-file-menu.png) |
+| Git: изменения, diff, коммит | Правый клик по файлу |
+| ![Терминал](docs/screenshots/07-terminal.png) | ![Настройки агента](docs/screenshots/08-agent-settings.png) |
+| Настоящий PowerShell в нижней панели | Настройки: адрес, модель, окно контекста, тема |
 
 ## Возможности
 
@@ -48,7 +71,7 @@ IDE для Windows со встроенным ИИ-ассистентом, кот
 Рядом с архивом лежит файл `.sha256`; при желании целостность можно проверить:
 
 ```powershell
-Get-FileHash .\LexiQode-0.1.0-win32-x64.zip -Algorithm SHA256
+Get-FileHash .\LexiQode-0.2.0-win32-x64.zip -Algorithm SHA256
 ```
 
 ## Первый запуск
@@ -195,10 +218,10 @@ powershell -ExecutionPolicy Bypass -File scripts\build-app.ps1
 Публикация сборки — обычным прикреплением архива к релизу GitHub:
 
 ```powershell
-gh release create v0.1.0 `
-  dist\LexiQode-0.1.0-win32-x64.zip `
-  dist\LexiQode-0.1.0-win32-x64.zip.sha256 `
-  --title "LexiQode 0.1.0" --notes "Первая сборка"
+gh release create v0.2.0 `
+  dist\LexiQode-0.2.0-win32-x64.zip `
+  dist\LexiQode-0.2.0-win32-x64.zip.sha256 `
+  --title "LexiQode 0.2.0" --notes-file CHANGELOG.md
 ```
 
 ## Тесты
@@ -210,9 +233,17 @@ cd app;   npm test
 ```
 
 Дополнительно есть два замера, которые запускают приложение и опрашивают его
-снаружи: `node app\scripts\probe-window.cjs` (интерфейс и взаимодействие) и
-`node app\scripts\probe-chat.cjs` (поднимает заглушку OpenAI-совместимого сервера
-и прогоняет через неё ядро целиком).
+снаружи, все — с изолированными настройками, так что их можно запускать при
+открытом приложении и они не касаются ваших файлов:
+
+| Скрипт | Что проверяет |
+|---|---|
+| `probe-window.cjs` | окно целиком: дерево, редактор, поиск, терминал, список моделей |
+| `probe-interactions.cjs` | панели без папки, перетаскивание границ, сохранение по сочетанию клавиш |
+| `probe-chat-window.cjs` | ассистент через окно: настройка, выбор модели, ответ, рассуждения, инструменты, вкладки чатов |
+| `probe-explorer-live.cjs` | дерево обновляется при изменениях на диске; правый клик по файлу и по пустому месту |
+| `probe-chat.cjs` | ядро целиком через заглушку OpenAI-совместимого сервера |
+| `capture-screenshots.cjs` | снимает скриншоты для README (см. выше) |
 
 ## Устройство репозитория
 
@@ -226,6 +257,9 @@ app/                  приложение
 core/                 агент на Python со своими тестами
 scripts/              сборка, запуск, ярлыки
 docs/protocol.md      протокол между окном и ядром
+docs/screenshots/     снимки для README, снятые на живом окне
+ROADMAP.md            куда проект идёт: MCP, Skills, подагенты, 1.0
+CHANGELOG.md          что вошло в каждый выпуск
 ```
 
 ## Лицензия и обратная связь
@@ -233,6 +267,7 @@ docs/protocol.md      протокол между окном и ядром
 Проект распространяется по лицензии [MIT](LICENSE). В сборке используются Monaco
 (MIT) и xterm.js (MIT).
 
-Сообщения об ошибках и предложения — через
-[Issues](../../issues). Пул-реквесты приветствуются; перед отправкой стоит
-прогнать оба набора тестов, команды приведены выше.
+Сообщения об ошибках и предложения — через [Issues](../../issues), планы — в
+[ROADMAP.md](ROADMAP.md), история выпусков — в [CHANGELOG.md](CHANGELOG.md).
+Пул-реквесты приветствуются; перед отправкой стоит прогнать оба набора тестов,
+команды приведены выше.

@@ -3,6 +3,9 @@
 ![platform](https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0078d4)
 ![licence](https://img.shields.io/badge/licence-MIT-green)
 ![python](https://img.shields.io/badge/python-3.11%2B-3776ab)
+![release](https://img.shields.io/badge/release-0.2.0-blue)
+![protocol](https://img.shields.io/badge/core%20protocol-1-lightgrey)
+![checks](https://img.shields.io/badge/tests-162%20core%20%2F%20145%20window-brightgreen)
 
 A Windows IDE with a built-in AI assistant that runs on **your own** model
 endpoint: any server compatible with the OpenAI `/chat/completions` API, such as a
@@ -14,6 +17,26 @@ are stored on the local machine, and the assistant contacts nothing but the addr
 you configure.
 
 [Русская версия](README.md)
+
+## What it looks like
+
+Every picture below is the application itself: `app/scripts/capture-screenshots.cjs`
+starts the window, opens a demonstration project in a temporary folder and captures
+the screen over DevTools, so no personal path and no key appears in any of them.
+
+![The assistant](docs/screenshots/02-assistant.png)
+
+*The assistant: reasoning folded into a line above the answer, the tools of the turn
+on one line, and how much of the model's window is in use under the composer.*
+
+| | |
+|---|---|
+| ![Editor](docs/screenshots/01-editor.png) | ![Find in files](docs/screenshots/05-search.png) |
+| Explorer and editor | Find in files, with results as they arrive |
+| ![Source control](docs/screenshots/06-source-control.png) | ![File menu](docs/screenshots/04-file-menu.png) |
+| Git: changes, diff, commit | Right-click on a file |
+| ![Terminal](docs/screenshots/07-terminal.png) | ![Agent settings](docs/screenshots/08-agent-settings.png) |
+| A real PowerShell in the bottom panel | Settings: endpoint, model, context window, theme |
 
 ## Features
 
@@ -49,7 +72,7 @@ Nothing is installed into the system. A `.sha256` file sits beside the archive; 
 download can be verified with:
 
 ```powershell
-Get-FileHash .\LexiQode-0.1.0-win32-x64.zip -Algorithm SHA256
+Get-FileHash .\LexiQode-0.2.0-win32-x64.zip -Algorithm SHA256
 ```
 
 ## First run
@@ -198,10 +221,10 @@ without building.
 Publishing a build is a matter of attaching the archive to a GitHub release:
 
 ```powershell
-gh release create v0.1.0 `
-  dist\LexiQode-0.1.0-win32-x64.zip `
-  dist\LexiQode-0.1.0-win32-x64.zip.sha256 `
-  --title "LexiQode 0.1.0" --notes "First build"
+gh release create v0.2.0 `
+  dist\LexiQode-0.2.0-win32-x64.zip `
+  dist\LexiQode-0.2.0-win32-x64.zip.sha256 `
+  --title "LexiQode 0.2.0" --notes-file CHANGELOG.md
 ```
 
 ## Tests
@@ -212,10 +235,18 @@ cd core;  python -m pytest tests -q
 cd app;   npm test
 ```
 
-Two probes start the application and interrogate it from outside:
-`node app\scripts\probe-window.cjs` (the interface and its behaviour) and
-`node app\scripts\probe-chat.cjs` (stands up a stub OpenAI-compatible server and
-drives the core through it end to end).
+Six scripts start the application and interrogate it from outside. All of them run
+with an isolated configuration, so they can be started while the application is
+open and never touch your own files:
+
+| Script | What it checks |
+|---|---|
+| `probe-window.cjs` | the whole window: tree, editor, search, terminal, model list |
+| `probe-interactions.cjs` | the panels with no folder open, dragging boundaries, saving by keyboard |
+| `probe-chat-window.cjs` | the assistant through the window: settings, model choice, an answer, reasoning, tools, chat tabs |
+| `probe-explorer-live.cjs` | the tree follows the disk; right-click on a file and on empty space |
+| `probe-chat.cjs` | the core end to end, through a stub OpenAI-compatible server |
+| `capture-screenshots.cjs` | takes the screenshots for this README (above) |
 
 ## Repository layout
 
@@ -229,6 +260,9 @@ app/                  the application
 core/                 the Python agent, with its own tests
 scripts/              build, run, shortcuts
 docs/protocol.md      the protocol between the window and the core
+docs/screenshots/     the pictures in this README, captured from a running window
+ROADMAP.md            where this goes: MCP, Skills, subagents, 1.0
+CHANGELOG.md          what each release contains
 ```
 
 ## Licence and feedback

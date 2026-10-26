@@ -1,0 +1,82 @@
+# Changelog
+
+Versions follow [semantic versioning](https://semver.org/): the major number
+marks a change no older configuration survives, the minor number a release that
+adds features, and the patch number a release that only fixes them. Nothing in
+this file is retrospective filler - each entry is a change that was made,
+measured on a running window, and re-checked by a test or a probe.
+
+## 0.2.0 - 2026-10-26
+
+The first release with a working assistant, and the reason this project exists at
+all. 0.1.0 was an editor; this is an editor with an agent inside it.
+
+### The assistant actually answers
+
+* A turn no longer hangs before it reaches the model. The workspace snapshot ran
+  `git status` with the core's stdin inherited, and the editor starts the core
+  with a pipe nobody writes to: git waited on that pipe, so every turn blocked
+  before the first token. Every command-line test passed, because a console's
+  stdin is a terminal.
+* The panel subscribes to the events the core emits. They were produced and
+  never drawn, which is what an assistant that answers nothing looks like.
+* Reasoning is one disclosure above the answer: open while the model thinks,
+  folded to "Thought for Ns" when the answer starts, a click away at any time.
+* Tool calls are one collapsed line per turn instead of a full-width row each,
+  with the arguments the model actually sent - they used to render as
+  `read_file [object Object]`.
+
+### The context is managed instead of overflowing
+
+* `context_window` is finally used. Past 75% of the window (minus the room an
+  answer needs) the core asks the model to summarise the oldest part of the
+  conversation, replaces it with that summary, and keeps the summary through
+  later compactions. Before this, the only limit was a count of 60 messages
+  applied after a turn had already run.
+* The composer shows how full the window is, and says whether the number was
+  reported by the server or estimated by the core.
+* The context window, the answer budget and the compaction threshold are
+  editable in the settings form; they were stored by the core and reachable
+  nowhere.
+
+### Chats are kept
+
+* Every conversation is a document of its own, saved as it is written, listed by
+  title, and opened in a tab. "New conversation" opens a new chat instead of
+  resetting the current one into oblivion.
+* Tabs are restored on the next start; a chat can be reopened from the list,
+  renamed, or deleted, without touching the others.
+
+### The window follows the folder
+
+* The file tree updates when the folder changes on disk - a build, a
+  `git checkout`, another editor, or the agent writing through the core. A file
+  created outside the application appears on its own.
+* A right-click opens a real menu: Open, Open to the side, Reveal in Explorer,
+  Copy path, Copy relative path, Rename, Delete - and for empty space, New file,
+  New folder, Reveal folder, Copy path, Refresh.
+* The theme is switchable from the settings (system, dark, light), not only from
+  the command palette.
+* The model the agent is actually configured with is named in the status bar, and
+  the folder that is open is named in the title bar with a button that opens
+  another one.
+
+### Core and interface
+
+* 162 core tests, 145 window tests, and four probes that drive a real application
+  window and report what it shows.
+* Settings written through the API are coerced to the type their field declares,
+  so a quoted `"128000"` cannot stop the agent with a `TypeError` in arithmetic
+  the user never sees.
+* The core and the application report one version. They used to disagree: the
+  artefact was named 0.1.0 and the core introduced itself as 1.0.0.
+
+## 0.1.0 - 2026-10-25
+
+The first working build: a Windows editor with a file tree, a Monaco editor with
+tabs, find in files, a git panel, a real PowerShell terminal, and an assistant
+panel that could reach an OpenAI-compatible endpoint the user configured.
+
+Not a public release. Kept in the changelog because the repository has no tags
+before this one, and a first entry that pretends to be a first release would be
+wrong.
