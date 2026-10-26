@@ -1,118 +1,108 @@
 # LexiQode
 
-An IDE with an AI assistant that runs on **your** endpoint: any server compatible
-with the OpenAI `/chat/completions` API. No subscription, no account, no vendor
-relay.
+![platform](https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0078d4)
+![licence](https://img.shields.io/badge/licence-MIT-green)
+![python](https://img.shields.io/badge/python-3.11%2B-3776ab)
+
+A Windows IDE with a built-in AI assistant that runs on **your own** model
+endpoint: any server compatible with the OpenAI `/chat/completions` API, such as a
+hosted gateway, a local runtime (Ollama, LM Studio and similar), or your own
+proxy.
+
+There is no subscription, no account and no vendor relay: the endpoint and the key
+are stored on the local machine, and the assistant contacts nothing but the address
+you configure.
 
 [Русская версия](README.md)
 
-## What it is made of
+## Features
 
-| Part | What it is |
+| Area | What it does |
 |---|---|
-| The window | our own interface, served over an internal `app://` scheme |
-| The editor | Monaco, the editing component from VS Code, used as a library |
-| The terminal | xterm.js and a shell connected through pipes |
-| The assistant | a separate Python core that the window starts and supervises |
-| The model | any OpenAI-compatible endpoint you configure |
-| Interface languages | Russian and English, switchable at runtime |
+| Editor | Monaco: syntax highlighting, tabs, unsaved-change marker, find in file, line endings preserved as they were |
+| Explorer | file tree, create, rename, delete to the recycle bin, reveal in Explorer |
+| Navigation | go to file with `Ctrl+P` using fuzzy matching, command palette |
+| Search | find in files with streaming results and cancellation |
+| Source control | git: staged and unstaged separated, diffs, stage, unstage, discard, commit, branch switching |
+| Terminal | a real PowerShell session in the bottom panel, colours, working directory preserved |
+| Assistant | streaming answers, separately shown reasoning, tool calls with arguments and results, approvals, cancel, new conversation |
+| Modes | Agent, Ask, Plan, Debug, Review - what the next message is allowed to do |
+| Interface | resizable and restorable layout, dark and light themes, Russian and English |
 
 ## Requirements
 
 * Windows 10 or 11, 64-bit.
-* **Python 3.11 or newer on `PATH`** for the assistant. The editor works without
-  it, and the app says what is missing.
-* No administrator rights: it is a folder you unpack and run.
-* Node.js 24 only if you build it yourself.
+* Python 3.11 or newer on `PATH` for the assistant. The editor works without it,
+  and the application says so.
+* Node.js 24, only to build from source.
+* No administrator rights.
 
-## Install and run
+## Installation
 
-**The simple way.** Unpack the archive and run `LexiQode.exe`:
+1. Download `LexiQode-<version>-win32-x64.zip` from the
+   [Releases](../../releases) page.
+2. Unpack it into any folder.
+3. Run `LexiQode.exe`.
 
-```
-dist\LexiQode-0.1.0-win32-x64.zip
-```
-
-The `.sha256` beside it carries the digest the build printed, so a download can be
-checked.
-
-**Install for the current user and make shortcuts** (no privileges needed):
+Nothing is installed into the system. A `.sha256` file sits beside the archive; the
+download can be verified with:
 
 ```powershell
-cd F:\Gitea\LexiQode2
-powershell -ExecutionPolicy Bypass -File scripts\run-app.ps1 -Deploy
-powershell -ExecutionPolicy Bypass -File scripts\create-shortcuts.ps1
+Get-FileHash .\LexiQode-0.1.0-win32-x64.zip -Algorithm SHA256
 ```
-
-**Run from the sources** (while changing code):
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\run-app.ps1 -Source
-```
-
-**Build the archive again:**
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\build-app.ps1
-```
-
-It runs the tests, stages the folder and writes the archive into `dist\`.
-`-SkipTests` skips the tests.
 
 ## First run
 
-The app **opens nothing by itself**. You get a screen with an *Open a folder*
-button and the recent folders. A folder can also be opened:
+The application does not open a folder by itself. It shows a screen with an *Open a
+folder* button and the list of recent folders. A folder can also be opened:
 
-* from the status bar, by clicking the leftmost item;
+* by clicking the "no folder open" item in the status bar;
 * with `Ctrl+K Ctrl+O`;
-* through `Ctrl+Shift+P` → *Open folder…*;
-* by passing a path: `LexiQode.exe F:\work\project` (an absolute path).
+* through the command palette: `Ctrl+Shift+P` → *Open folder…*;
+* by passing a path at launch: `LexiQode.exe D:\projects\example` (an absolute
+  path).
 
-Then configure a model; without one the assistant will say that no model is
-selected.
+Without an open folder the assistant does not start, because it works inside one.
 
-## Configuring the model
+## Configuring a model
 
-Open the assistant panel (`Ctrl+Shift+A`) and press the gear.
+The assistant panel opens with `Ctrl+Shift+A`; its settings are behind the gear
+button in its header.
 
-| Field | What goes in it |
+| Field | Value |
 |---|---|
-| endpoint | a base URL, for example `https://api.example.com/v1` or `http://127.0.0.1:11434/v1` |
-| api key | stored on your machine, sent only to that endpoint |
-| model | the model id |
+| endpoint | base URL: `https://api.example.com/v1`, `http://127.0.0.1:11434/v1` |
+| api key | stored locally, sent only to that endpoint |
+| model | the model id; the list is filled in automatically |
 
-The model list is **fetched on its own** as soon as the endpoint and the key are
-entered - there is nothing to save first. If the endpoint is unreachable or the
-list is empty, the form shows why and offers *Ask again*.
+The model list is requested as soon as the endpoint and the key are entered; there
+is nothing to save first. The request goes to `GET {endpoint}/models`, so the base
+URL has to be the one that makes that path correct. If the server is unreachable or
+the list is empty, the form shows why and offers to try again.
 
-The scan calls `GET {endpoint}/models`, which is how the OpenAI-compatible
-protocol works; the base URL has to be the one that makes that path right.
-
-The same settings can be set without the window:
+The same settings can be configured without the graphical interface:
 
 ```powershell
 $env:LEXIQODE_BASE_URL = 'https://api.example.com/v1'
 $env:LEXIQODE_API_KEY  = 'sk-...'
 $env:LEXIQODE_MODEL    = 'your-model'
-python -m lexiqode doctor
+python -m lexiqode doctor     # checks the endpoint, the key and the model
 ```
 
-Where things live:
+State files:
 
-* `%APPDATA%\LexiQode\settings.json` - the agent: endpoint, key, model, limits;
-* `%APPDATA%\LexiQode\app-settings.json` - the window: layout, theme, language,
-  open tabs;
-* `%LOCALAPPDATA%\LexiQode` - transcripts and other per-machine data.
+| Path | Contents |
+|---|---|
+| `%APPDATA%\LexiQode\settings.json` | the agent: endpoint, key, model, limits |
+| `%APPDATA%\LexiQode\app-settings.json` | the window: layout, theme, language, tabs |
+| `%LOCALAPPDATA%\LexiQode` | transcripts and other per-machine data |
 
 ## Modes
 
-The mode is chosen in the composer at the bottom of the assistant panel, from a
-dropdown with icons. It is the decision about what the next message may do, and it
-is enforced by the core: a forbidden tool is removed from the schemas **and**
-refused by the registry, so a mode cannot be talked around.
+The mode is chosen in the composer of the assistant panel, from a dropdown with
+icons. It is the decision about what the next message may do.
 
-| Mode | Reads files | Writes | Runs commands |
+| Mode | Reads files | Modifies files | Runs commands |
 |---|---|---|---|
 | Agent | yes | yes | yes |
 | Ask | yes | no | no |
@@ -120,86 +110,69 @@ refused by the registry, so a mode cannot be talked around.
 | Debug | yes | yes | yes |
 | Review | yes | no | no |
 
+Modes are enforced in the core rather than only displayed: a forbidden tool is
+removed from the schemas and refused by the tool registry.
+
 ## Keyboard
 
 | Keys | Action |
 |---|---|
 | `Ctrl+P` | go to a file |
 | `Ctrl+Shift+P` | command palette |
-| `Ctrl+S` | save the file |
-| `Ctrl+Shift+S` | save all files |
-| `Ctrl+Shift+F` | search across files |
-| `Ctrl+B` | show or hide the sidebar |
-| `Ctrl+J` | show or hide the bottom panel (terminal) |
-| `Ctrl+Shift+A` | show or hide the assistant |
-| `Ctrl+L` | focus the assistant's input |
-| `Ctrl+Shift+E` | explorer |
-| `Ctrl+Shift+G` | source control |
+| `Ctrl+S` / `Ctrl+Shift+S` | save the file / all files |
+| `Ctrl+Shift+F` | find in files |
+| `Ctrl+B` | sidebar |
+| `Ctrl+J` | bottom panel (terminal) |
+| `Ctrl+Shift+A` | assistant panel |
+| `Ctrl+L` | focus the assistant input |
+| `Ctrl+Shift+E` / `Ctrl+Shift+G` | explorer / source control |
 | `Ctrl+K Ctrl+O` | open a folder |
 | `Esc` | close a list or the palette |
 
-## Changing the interface language
+## Interface language
 
-The *window language* row in the agent settings, or the *Window language: change*
-command in the palette, cycles system → Russian → English. By default it follows
-the system.
+Switch it with the "window language" row in the assistant settings, or with the
+"Window language: change" command in the palette: follow the system → Russian →
+English. By default the system language is used.
 
-Dictionaries are plain data files, `app/src/shared/i18n.ru.json` and
-`app/src/shared/i18n.en.json`. Adding a language means adding such a file and one
-code in `app/src/shared/i18n.js`; a test compares the files key by key.
+Dictionaries are data files, `app/src/shared/i18n.ru.json` and
+`app/src/shared/i18n.en.json`. Adding a language means adding such a file and its
+code in `app/src/shared/i18n.js`; a test compares the key sets of the dictionaries
+and refuses to let them drift apart.
 
-## What it does
+## Limitations
 
-Explorer (create, rename, delete to the recycle bin, reveal); Monaco (syntax,
-tabs, dirty state, line endings preserved on save, find in file); quick open;
-find in files with cancellation; source control (staged and unstaged separated,
-diffs, stage, unstage, discard, commit, branch switching); a terminal with a real
-PowerShell session; the assistant with streaming, separately shown reasoning, tool
-rows, approvals and cancel; a resizable, restorable layout; dark and light themes.
-
-## What it does not do
-
-* **The terminal is a command console.** Full-screen programs (`vim`, `top`) do not
-  work in it, because a shell driven through pipes has no pseudo-console.
-  Everything that reads a command and prints lines works.
-* **No third-party extensions.** Languages, themes and commands come from the app.
-* **Language intelligence is Monaco's.** Real language services for TypeScript,
-  JavaScript, JSON, CSS and HTML; syntax, brackets and folding elsewhere.
+* **The terminal is a command console.** The shell is connected through pipes and
+  there is no pseudo-console, so full-screen programs (`vim`, `top`) do not work in
+  it. Everything that reads a command and prints lines does work.
+* **No third-party extensions.** Languages, themes and commands are provided by the
+  application itself.
+* **Language support comes from Monaco:** real language services for TypeScript,
+  JavaScript, JSON, CSS and HTML, and syntax highlighting, bracket matching and
+  folding for everything else.
 * **One folder per window.**
-* **No telemetry.** The window has no network access at all (`connect-src 'none'`);
-  only the core uses the network, and only to reach your endpoint.
-* Messages that come from the core are printed as the core phrased them.
+* **No telemetry.** The window has no network access at all; only the core uses the
+  network, and only to reach the endpoint you configured.
+* Messages that originate in the core are printed as the core phrased them.
+* Only Windows is supported.
 
-## Tests
-
-```powershell
-cd core;  python -m pytest tests -q      # the agent, its tools and its protocol
-cd app;   npm test                       # 111 tests: shared logic and window contracts
-```
-
-Two probes start the application and interrogate it:
+## Building from source
 
 ```powershell
-node app\scripts\probe-window.cjs        # the interface: tree, editor, search, terminal, modes, settings form
-node app\scripts\probe-chat.cjs          # stands up an OpenAI stub and drives the core through it
-```
-
-The window's tests include a live shell test and static contracts: elements,
-channels, imports, the key set of both dictionaries, and that the core serves the
-routes this window calls.
-
-## Building and publishing
-
-There is no CI; builds are local:
-
-```powershell
+git clone https://github.com/KentoGasai/LexiQode2.git
+cd LexiQode2\app
+npm install
+node node_modules\electron\install.js
+cd ..
 powershell -ExecutionPolicy Bypass -File scripts\build-app.ps1
 ```
 
-That produces the staged folder, `dist\LexiQode-<version>-win32-x64.zip` and its
-digest file. The version comes from `app/package.json`.
+The script runs the tests, stages a portable folder and writes an archive with its
+digest into `dist\`. The version comes from `app/package.json`. `-SkipTests` skips
+the tests; `scripts\run-app.ps1 -Source` runs the application from the sources
+without building.
 
-To publish on GitHub, attach the archive to a release (requires `gh`):
+Publishing a build is a matter of attaching the archive to a GitHub release:
 
 ```powershell
 gh release create v0.1.0 `
@@ -208,22 +181,38 @@ gh release create v0.1.0 `
   --title "LexiQode 0.1.0" --notes "First build"
 ```
 
-For an existing release: `gh release upload v0.1.0 path\to\archive`.
+## Tests
+
+```powershell
+pip install -r core\requirements.txt pytest
+cd core;  python -m pytest tests -q
+cd app;   npm test
+```
+
+Two probes start the application and interrogate it from outside:
+`node app\scripts\probe-window.cjs` (the interface and its behaviour) and
+`node app\scripts\probe-chat.cjs` (stands up a stub OpenAI-compatible server and
+drives the core through it end to end).
 
 ## Repository layout
 
 ```
-app/                  the window
-  src/main/           window, IPC, workspace, search, git, terminal, agent bridge
-  src/preload/        the entire surface the page may call
+app/                  the application
+  src/main/           Electron process: window, IPC, workspace, search, git, terminal, agent link
+  src/preload/        the only set of calls the page may make
   src/renderer/       the interface: markup, styles, modules
-  src/shared/         logic both sides use, and the language dictionaries
-  test/               the window's tests
+  src/shared/         logic shared by both sides, and the language dictionaries
+  test/               tests
 core/                 the Python agent, with its own tests
 scripts/              build, run, shortcuts
 docs/protocol.md      the protocol between the window and the core
 ```
 
-## Licence
+## Licence and feedback
 
-MIT. The build uses Monaco (MIT) and xterm.js (MIT).
+Released under the [MIT licence](LICENSE). The build uses Monaco (MIT) and xterm.js
+(MIT).
+
+Bug reports and suggestions are welcome in
+[Issues](../../issues). Pull requests are welcome too; running both test suites
+before sending one is appreciated, and the commands are above.
