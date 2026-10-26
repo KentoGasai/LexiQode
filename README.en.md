@@ -20,14 +20,15 @@ you configure.
 | Area | What it does |
 |---|---|
 | Editor | Monaco: syntax highlighting, tabs, unsaved-change marker, find in file, line endings preserved as they were |
-| Explorer | file tree, create, rename, delete to the recycle bin, reveal in Explorer |
+| Explorer | file tree that follows the disk by itself, right-click menu on a file and on a folder, create, rename, delete to the recycle bin, reveal in Explorer, copy path |
 | Navigation | go to file with `Ctrl+P` using fuzzy matching, command palette |
 | Search | find in files with streaming results and cancellation |
 | Source control | git: staged and unstaged separated, diffs, stage, unstage, discard, commit, branch switching |
 | Terminal | a real PowerShell session in the bottom panel, colours, working directory preserved |
-| Assistant | streaming answers, reasoning folded into a "Thinking…" line above the answer, one line of tools per turn (arguments and results one click away), a context gauge and automatic compaction, approvals, cancel, new conversation |
+| Assistant | streaming answers, reasoning folded into a "Thinking…" line above the answer, one line of tools per turn (arguments and results one click away), a context gauge and automatic compaction, approvals, cancel |
+| Chats | every conversation is saved on disk on its own and opens in a tab: a new chat does not erase the previous one, a saved chat can be reopened from the list, and each can be renamed or deleted |
 | Modes | Agent, Ask, Plan, Debug, Review - what the next message is allowed to do |
-| Interface | resizable and restorable layout, dark and light themes, Russian and English |
+| Interface | resizable and restorable layout, dark and light themes (from the settings and the command palette), Russian and English |
 
 ## Requirements
 
@@ -91,6 +92,16 @@ compress the oldest part and replaces it with a summary; a "Context compacted" l
 appears in the transcript. That summary is kept through later compactions, so
 decisions and paths are not lost; if the summary call fails, the old part is dropped
 with a note saying what was lost.
+
+## Conversations
+
+Every chat is saved on disk as a file of its own and opens in a tab above the
+transcript. A new chat (the `+` button, or "New conversation") opens another tab
+and leaves the previous one alone; the "≡" button lists the saved chats, and any
+of them can be brought back into a tab, renamed (right-click a tab) or deleted.
+The open tabs are restored on the next start, and the conversations themselves
+live in `%LOCALAPPDATA%\LexiQode\conversations\<folder>\` - one file per chat, so
+switching folders never mixes two projects up.
 
 The same settings can be configured without the graphical interface:
 
