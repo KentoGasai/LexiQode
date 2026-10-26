@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      No remote anything. `connect-src 'none'` is the load-bearing part: the
+      window has no way to reach the network, so the model endpoint is only ever
+      contacted by the main process. `unsafe-eval` is required by Monaco's AMD
+      loader, which compiles its module definitions with the Function
+      constructor; every script it loads comes from this application's own
+      vendor directory.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'none'; worker-src 'self' blob:; child-src 'self' blob:;"
+    />
+    <title>LexiQode</title>
+    <link rel="stylesheet" href="vendor/xterm/xterm.css" />
+    <link rel="stylesheet" href="css/app.css" />
+  </head>
+  <body>
+    <div class="app" id="app">
+      <header class="titlebar" id="titlebar">
+        <div class="titlebar__drag">
+          <span class="titlebar__logo" id="brand">LexiQode</span>
+          <nav class="titlebar__menus" id="menubar"></nav>
+        </div>
+        <div class="titlebar__right">
+          <button class="chip" id="titlebar-agent" title="Agent status" type="button">agent: off</button>
+        </div>
+      </header>
+
+      <div class="body">
+        <nav class="activity" id="activity" aria-label="Views"></nav>
+
+        <aside class="sidebar" id="sidebar">
+          <div class="pane__head">
+            <span class="pane__title" id="sidebar-title">Explorer</span>
+            <div class="pane__actions" id="sidebar-actions"></div>
+          </div>
+          <div class="pane__body" id="sidebar-body"></div>
+          <div class="resizer resizer--v" id="sidebar-resizer" role="separator" aria-orientation="vertical"></div>
+        </aside>
+
+        <main class="main">
+          <div class="tabs" id="tabs"></div>
+          <div class="editor" id="editor"></div>
+          <section class="welcome" id="welcome"></section>
+
+          <section class="panel" id="panel">
+            <div class="resizer resizer--h" id="panel-resizer" role="separator" aria-orientation="horizontal"></div>
+            <div class="pane__head">
+              <div class="panel__tabs" id="panel-tabs"></div>
+              <div class="pane__actions" id="panel-actions"></div>
+            </div>
+            <div class="pane__body pane__body--flush" id="panel-body"></div>
+          </section>
+        </main>
+
+        <aside class="chat" id="chat">
+          <div class="resizer resizer--v" id="chat-resizer" role="separator" aria-orientation="vertical"></div>
+          <div class="pane__head">
+            <span class="pane__title">Assistant</span>
+            <span class="dot" id="chat-dot" data-state="off"></span>
+            <div class="pane__actions" id="chat-actions"></div>
+          </div>
+          <div class="transcript" id="transcript"></div>
+          <div class="composer" id="composer">
+            <div class="composer__context" id="composer-context"></div>
+            <textarea
+              id="composer-input"
+              class="composer__input"
+              rows="1"
+              placeholder="Ask, plan, debug or hand over a task…"
+              spellcheck="false"
+            ></textarea>
+            <div class="composer__row">
+              <div class="modes" id="composer-modes"></div>
+              <div class="composer__spacer"></div>
+              <button class="btn btn--ghost" id="composer-stop" type="button" hidden>Stop</button>
+              <button class="btn btn--primary" id="composer-send" type="button">Send</button>
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      <footer class="statusbar" id="statusbar"></footer>
+    </div>
+
+    <div class="overlay" id="overlay" hidden>
+      <div class="palette" role="dialog" aria-modal="true">
+        <input id="palette-input" class="palette__input" type="text" spellcheck="false" autocomplete="off" />
+        <div class="palette__list" id="palette-list"></div>
+        <div class="palette__hint" id="palette-hint"></div>
+      </div>
+    </div>
+
+    <div class="toasts" id="toasts"></div>
+
+    <!--
+      xterm is loaded as a classic script before the module entry point: it is
+      the terminal renderer, it has no module build in the vendored copy, and it
+      must exist before the terminal panel's code runs.
+    -->
+    <script src="vendor/xterm/xterm.js"></script>
+    <script src="vendor/xterm/addon-fit.js"></script>
+    <script type="module" src="js/main.js"></script>
+  </body>
+</html>

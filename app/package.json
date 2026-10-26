@@ -1,0 +1,22 @@
+{
+  "name": "lexiqode",
+  "productName": "LexiQode",
+  "version": "0.1.0",
+  "private": true,
+  "description": "LexiQode - an AI IDE on your own OpenAI-compatible endpoint",
+  "license": "MIT",
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test",
+    "vendor": "node scripts/vendor.mjs"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "monaco-editor": "^0.57.0"
+  },
+  "devDependencies": {
+    "electron": "^45.0.0"
+  }
+}

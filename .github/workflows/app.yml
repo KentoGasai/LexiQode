@@ -1,0 +1,90 @@
+name: app
+
+# Two jobs, because they cost very different amounts of time. `verify` runs both
+# test suites in seconds on Linux and is the gate; `package` runs on Windows,
+# where the portable bundle can actually be produced, and is the only thing that
+# produces an artifact. A broken test therefore never spends a Windows runner.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    name: tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install the core
+        working-directory: core
+        run: pip install -r requirements.txt pytest
+      - name: Core tests
+        working-directory: core
+        run: python -m pytest tests -q
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install the app's dependencies
+        working-directory: app
+        env:
+          # The test suite needs the packages, not the Electron binary; skipping
+          # the download saves about a hundred megabytes on every run.
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: npm install --no-audit --no-fund
+      - name: App tests
+        working-directory: app
+        run: npm test
+
+  package:
+    name: portable bundle
+    needs: verify
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install the app's dependencies
+        working-directory: app
+        run: npm install --no-audit --no-fund
+      - name: Fetch the Electron binary
+        working-directory: app
+        run: node node_modules/electron/install.js
+
+      - name: Build the bundle and the zip
+        shell: pwsh
+        run: ./scripts/build-app.ps1 -SkipTests
+
+      - name: Upload the bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: LexiQode-win32-x64
+          path: |
+            dist/*.zip
+            dist/*.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+      # Optional: a repository that sets GITEA_SERVER, GITEA_OWNER and
+      # GITEA_TOKEN gets its builds published; one that does not still gets a
+      # verified artifact. Nothing here fails a build for a missing secret.
+      - name: Publish to the Gitea package registry
+        if: ${{ secrets.GITEA_TOKEN != '' && vars.GITEA_SERVER != '' }}
+        shell: pwsh
+        env:
+          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+          GITEA_OWNER: ${{ secrets.GITEA_OWNER }}
+        run: |
+          ./scripts/publish-gitea.ps1 -Server "${{ vars.GITEA_SERVER }}" -Owner $env:GITEA_OWNER

@@ -1,200 +1,194 @@
-## Building the IDE
-
-The product is a patched build of the VS Code sources, so the native modules have
-to be compiled with the Microsoft C++ toolchain. See
-`docs/build-without-admin.md` for the options when the machine does not have
-installer rights - including building in CI, where that toolchain is already
-present, and running the resulting portable folder locally.
-
-With the toolchain available:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/check-prerequisites.ps1
-powershell -ExecutionPolicy Bypass -File scripts/build-ide.ps1 -Dev   # run from source
-powershell -ExecutionPolicy Bypass -File scripts/build-ide.ps1        # package
-```
 # LexiQode
 
-An AI coding editor built from open parts: the VSCodium shell plus our own agent
-runtime, driving any OpenAI-compatible model you point it at.
+An IDE with an assistant that runs on **your** endpoint.
 
-No subscription, no account, no vendor lock-in. You supply a base URL, an API
-key and a model id; LexiQode supplies the editor, the agent loop and the tools.
-Nothing here contacts an endpoint you did not configure.
+No subscription, no account, no vendor relay. You point it at anything that
+speaks the OpenAI `chat/completions` API - a hosted gateway, a local runtime, or
+your own proxy - and the agent works in the folder you opened: reading files,
+editing them, running commands, with a mode that decides how much it may do.
 
-## Why it is built this way
+## What it is, and what it stopped being
 
-Cursor is a closed fork of VS Code with a closed agent service. What is
-interesting about it is the *behaviour* - an agent that reads the repo, edits
-files, runs the tests and shows you a diff before it commits. That behaviour is
-not patented; it is engineering. This repository reimplements it on open
-foundations:
+This started as a patched build of the VS Code sources. That path is retired:
+two days went into fighting a 40-minute native build and a window that insisted
+on showing somebody else's chat, and none of it produced anything the user could
+see. The product is now its own application.
 
-| layer | choice | why |
-|---|---|---|
-| shell | VSCodium fork | upstream VS Code without the Microsoft telemetry and branding layers |
-| agent | our own Python core (`core/`) | independent of any editor, testable without a network |
-| models | any OpenAI-compatible endpoint | your gateway, your local runtime, your key |
-| editor glue | our own extension (`extension/`) | stable public APIs only, so an upstream rebase stays cheap |
-
-The reverse-engineering record for Cursor - measured surfaces, evidence and the
-feature matrix we work from - lives in `docs/cursor/`.
-
-## Status
-
-| part | state |
+| | |
 |---|---|
-| `core/` agent runtime | **working**, 136 tests plus a 24-check end-to-end smoke test |
-| `docs/protocol.md` contract | **frozen** at protocol 1, extended additively |
-| `extension/` VSCodium glue | **working**: agent panel, modes, in-panel settings, approvals, diffs, inline edit |
-| `vscodium/` branded build | not started - the cross-cutting work |
+| The window | our own, drawn by our own HTML and CSS, delivered over a custom `app://` scheme |
+| The editor | Monaco, the editing component from VS Code, used as a library |
+| The terminal | xterm.js driving a shell through pipes |
+| The assistant | our own Python core, started and supervised by the window |
+| The model | any OpenAI-compatible endpoint, configured by you |
 
-### What is and is not "native" yet
+Monaco and xterm are the two pieces of "their functionality" that are worth
+having, and both are ordinary dependencies under MIT. Nothing else about the
+editor comes from a fork.
 
-Honest boundary, because it decides the next step:
+## Requirements
 
-* the chat, its mode row and its settings live in a **webview view** contributed by
-  the extension. It looks and behaves like part of the editor, and the panel opens
-  itself the first time a project is opened, but it is still an extension surface:
-  it can be uninstalled, and it cannot draw outside a view.
-* the deeper Cursor surfaces - completion inside the editor, a rewritten layout, a
-  chat drawn by the workbench itself - need the **branded build**: VSCodium
-  compiled from source with our patches, the extension preinstalled, and our
-  `product.json`. Until that exists, "native" means "opens by itself and looks at
-  home", not "is compiled into the shell".
+* Windows 10 or 11, 64-bit.
+* **Python 3.11 or newer on `PATH`** for the assistant. The editor half runs
+  without it, and says so instead of failing silently.
+* No administrator rights. The app is a folder you unpack and run.
+* Node.js 24 only if you want to build it yourself.
 
-## Quick start
+## Install
 
-```bash
-cd core
-python -m pip install -r requirements.txt
-python -m lexiqode config init
-python -m lexiqode config set profile.default.base_url  https://your-gateway.example.com
-python -m lexiqode config set profile.default.model     your-model-id
-python -m lexiqode config set profile.default.api_key   sk-...
+1. Download `LexiQode-<version>-win32-x64.zip` from your Gitea package registry
+   (see [docs/gitea-packages.md](docs/gitea-packages.md)) or from the build
+   artifacts of this repository.
+2. Unpack it anywhere and run `LexiQode.exe`.
+3. The digest next to the download is the file's SHA-256; the same digest is
+   printed by the build and by the upload.
 
-python -m lexiqode doctor                 # checks the endpoint for real
-python -m lexiqode chat                   # try the agent
-```
-
-Then, from the repository root:
-
-```bash
-python scripts/smoke_core.py                     # end-to-end run against a local fake provider
-```
-
-## Use it in the editor
+To build it yourself:
 
 ```powershell
-# 1. get VSCodium (portable, verified against the published sha256)
-powershell -ExecutionPolicy Bypass -File scripts\install-vscodium.ps1
-
-# 2. once per checkout: the extension's build dependencies
-cd extension; npm install; cd ..
-
-# 3. build, install into the editor, and start it
-powershell -ExecutionPolicy Bypass -File scripts\run-lexiqode.ps1
+powershell -ExecutionPolicy Bypass -File scripts/build-app.ps1
+powershell -ExecutionPolicy Bypass -File scripts/run-app.ps1 -Deploy
 ```
 
-Step 3 is repeatable: it rebuilds, replaces the installed copy and starts the
-editor. In the editor, open the LexiQode icon in the activity bar.
+`build-app.ps1` runs both test suites, stages the bundle, and writes the zip and
+its digest into `dist/`. `run-app.ps1 -Deploy` copies it into
+`%LOCALAPPDATA%\Programs\LexiQode`, which needs no privileges.
 
-**Point it at your model.** Run `LexiQode: Set Up the Model Endpoint` from the
-command palette. It asks for the endpoint, the key and the model - and for the
-model it asks *your server* for the list first, so you pick instead of typing.
-The key goes into the operating system's credential store, the endpoint and model
-into your user settings; no file in the repository is touched.
+## Point it at a model
 
-If you prefer to keep configuration in the core instead of the editor, the same
-three values work there and the editor settings can stay empty:
+Open the assistant, press the gear in its header, and fill in the endpoint:
 
-```bash
-python -m lexiqode config set profile.default.base_url https://your-gateway.example.com/v1
-python -m lexiqode config set profile.default.model    your-model-id
-python -m lexiqode config set profile.default.api_key  sk-...
+* **endpoint** - the base URL, for example `https://api.example.com/v1` or
+  `http://127.0.0.1:11434/v1`.
+* **api key** - stored on your machine; it is never sent anywhere except that
+  endpoint.
+* **model** - the model id. *Save & test* saves first and then asks the endpoint
+  which models it offers, because that is the only order in which the question
+  can be answered truthfully.
+
+The same settings can be set without the window:
+
+```powershell
+$env:LEXIQODE_BASE_URL = 'https://api.example.com/v1'
+$env:LEXIQODE_API_KEY  = 'sk-...'
+$env:LEXIQODE_MODEL    = 'your-model'
+python -m lexiqode doctor     # verifies the endpoint and the key
 ```
 
-### While working on the extension
+Settings live in `%APPDATA%\LexiQode`: `settings.json` for the agent (endpoint,
+key, model, limits) and `app-settings.json` for the window (layout, theme, open
+tabs). Transcripts and other per-machine data live in `%LOCALAPPDATA%\LexiQode`.
 
-Press <kbd>F5</kbd> in the editor: the launch configuration **LexiQode: run in
-VSCodium** opens VSCodium with the extension loaded from source and this
-repository as the workspace, so the core is found automatically. Use the task
-**LexiQode: watch the extension** in the background for a compile-on-save loop.
+## The five modes
 
-Inside the editor:
+Modes are enforced by the core, not drawn on a button: an excluded tool is
+removed from the schemas **and** refused by the registry, so a mode cannot be
+talked around by a persuasive model.
 
-| action | how |
+| Mode | May read | May write | May run |
+|---|---|---|---|
+| Agent | yes | yes | yes |
+| Ask | yes | no | no |
+| Plan | yes | no | no |
+| Debug | yes | yes | yes |
+| Review | yes | no | no |
+
+Modes sit in the composer, at the bottom of the panel, because that is where the
+decision is made: what the next message is allowed to do. The header carries
+status only.
+
+## What works
+
+Verified by driving the built application through the DevTools protocol, not by
+reading the code (`app/scripts/probe-window.cjs`):
+
+| | |
 |---|---|
-| ask for a change | type in the panel; the agent edits files and runs tests |
-| choose what the agent may do | the mode row at the top of the panel: Agent, Ask, Plan, Debug, Review |
-| change endpoint, model, key, approvals | the gear in the panel header |
-| approve a risky step | inline card in the panel, or a modal dialog when it is collapsed |
-| review a file change | the diff opens automatically; the panel keeps a "review change" link |
-| rewrite a selection | select code, then `Ctrl+Alt+K` |
-| stop a turn | `Stop` in the panel, or `LexiQode: Stop the Running Turn` |
+| Explorer | file tree, create, rename, delete to the recycle bin, reveal |
+| Editor | Monaco: syntax, multiple tabs, dirty state, CRLF preserved on save, find in file |
+| Quick open | `Ctrl+P`, ranked by a fuzzy score with a boundary bonus |
+| Find in files | `Ctrl+Shift+F`, streaming results in batches, cancellable |
+| Search and replace | in the active file, through Monaco |
+| Source control | status split into staged and unstaged, diffs, stage, unstage, discard, commit, branch switch |
+| Terminal | `Ctrl+J`, real PowerShell session, `cd` persists, colour, UTF-8 or the shell's own code page |
+| Assistant | streaming answers, reasoning shown separately, tool rows with arguments and results, approvals, cancel, new conversation |
+| Layout | resizable and restorable: sidebar, panel, assistant, open tabs |
+| Appearance | dark and light, following the system by default |
 
-## Verifying it
+## What it deliberately does not do
 
-Three levels, cheapest first:
+Stated plainly, because a hidden limitation is worse than a missing feature:
 
-| command | what it proves |
-|---|---|
-| `cd core; python -m unittest discover -s tests -t .` | the agent loop, tools, approvals and HTTP surface (116 tests) |
-| `cd extension; npm test` | the client against a real core process, and activation with a stubbed editor (12 tests) |
-| `powershell -File scripts\test-in-editor.ps1` | the extension loaded and running inside a real VSCodium: activation, commands, settings schema, a real core spawn, the handshake, token enforcement, the view revealing |
-| `cd extension; npm run check-types:editor` | the types **the editor** sees, using its own bundled TypeScript |
-
-The in-editor run uses a throwaway user profile and a core pointed at a closed
-port, so it needs no model, no key and touches none of your own settings.
-
-`check-types:editor` exists because the editor and the build can disagree: the
-editor ships its own TypeScript (6.0, which no longer picks up `@types/*` on its
-own) while `npm run compile` uses the repository's. When they differ the editor
-underlines code that builds perfectly. `tsconfig.json` names `node` explicitly and
-`.vscode/settings.json` pins the editor to the repository's TypeScript, so both
-sides see the same thing.
-
-## How the pieces fit
-
-```
-   VSCodium  ──────────────►  extension/  ──────────────►  core/  ──────────►  your model endpoint
-   (the editor)                TypeScript                  Python                /chat/completions
-                               spawns the core,            agent loop,
-                               renders the agent,          tools, approvals
-                               applies the diffs
-```
-
-The extension spawns the core as a child process, reads a single handshake line
-from its stdout and then talks HTTP plus one SSE stream. Because that boundary is
-a documented protocol rather than an in-process API, the core can be replaced,
-driven from a terminal, or tested without an editor at all - and a second editor
-window attaches to the running core instead of starting a competing one.
-
-## Safety model
-
-The agent runs with your privileges, so the guardrails are explicit rather than
-implied:
-
-* every file path a tool receives is resolved and confined to the workspace root;
-* writes and shell commands are gated by an approval prompt that the model cannot
-  bypass, and an unanswered prompt counts as a **refusal**;
-* the API binds to loopback and requires a token that is generated per process
-  and never stored;
-* the token is never exposed to the webview that renders the UI.
+* **The terminal is a command console.** A shell driven through pipes has no
+  pseudo-console, so full-screen programs (`vim`, `top`) cannot run in it.
+  Everything that reads a command and prints lines does. A pseudo-console on
+  Windows needs a native module compiled at build time, and an IDE that only
+  builds where Visual Studio is installed is a worse trade.
+* **No extension API.** The editor has no third-party extension host. Language
+  support, themes and commands come from the app itself.
+* **Language intelligence is Monaco's.** TypeScript, JavaScript, JSON, CSS and
+  HTML get real language services; other languages get syntax, brackets and
+  folding, without a language server.
+* **One folder per window.** Opening another folder replaces the workspace; a
+  second window is a second process.
+* **No telemetry, and no network requests at all except to your endpoint.** The
+  window is served with `connect-src 'none'`: it cannot reach the network even
+  if something in it tried.
 
 ## Layout
 
 ```
-core/               the agent runtime: loop, tools, approvals, HTTP + SSE API
-extension/          the editor glue: panel, diffs, inline edit, core lifecycle
-docs/protocol.md    the UI <-> core contract, frozen at protocol 1
-docs/cursor/        what was measured on Cursor and the feature matrix
-scripts/            installers, the end-to-end smoke test, the in-editor runner
+app/                  the window: Electron main process, preload, our interface
+  src/main/           window, IPC, workspace, search, git, terminal, agent bridge
+  src/preload/        the entire surface the page is allowed to call
+  src/renderer/       the interface: markup, styles, modules
+  src/shared/         logic both sides use, with its own tests
+  test/               100 tests, `npm test`
+  scripts/            vendoring the browser bundles, probes
+core/                 the agent: Python, OpenAI-compatible, its own test suite
+extension/            optional: the same agent inside VS Code, Cursor or VSCodium
+scripts/              build, run, publish, and one-off research tools
+docs/                 protocol, packages, and the notes behind decisions
 ```
 
-## Scope
+## Tests
 
-This project reimplements functionality from scratch on open foundations. It does
-not patch, bypass or redistribute another product's code, assets, branding or
-licence checks, and the reverse-engineering notes in `docs/cursor/` record
-observable behaviour and public surface only, with the evidence they came from.
+```powershell
+cd core;  python -m pytest tests -q      # the agent, its tools and its protocol
+cd app;   npm test                       # 100 tests: shared logic, window contracts
+node app/scripts/probe-window.cjs        # starts the app and interrogates the window
+```
+
+The app's tests are not only unit tests. They include a live shell test (a real
+PowerShell is started and driven) and a set of static contracts over the window's
+sources: every element the scripts look up must exist in the markup, every
+channel the window subscribes to must exist in the shared constants, every import
+must resolve, and the only code allowed to produce markup is the icon set and the
+markdown renderer, which escapes its input first.
+
+The window probe is a smoke test against the real application - the same thing
+that found the terminal rendering nothing when the panel was restored open, and
+the fuzzy scorer ranking `a-p-p-deep.js` above `app.js`. It accepts
+`LEXIQODE_PROBE_EXE` to check a packaged bundle instead of the sources.
+
+## Publishing
+
+`scripts/publish-gitea.ps1` uploads a built zip to Gitea's generic package
+registry, which is the one that suits a desktop application: it keeps the file
+exactly as built, next to the git tag that describes it.
+
+```powershell
+$env:GITEA_TOKEN = '...'      # Settings > Applications, scope write:package
+powershell -ExecutionPolicy Bypass -File scripts/publish-gitea.ps1 `
+    -Server https://git.example.com -Owner your-name
+```
+
+See [docs/gitea-packages.md](docs/gitea-packages.md) for the details, including
+how the CI workflow publishes on a tag when the secrets are present.
+
+## Using the agent in another editor
+
+`extension/` contains a VS Code extension that talks to the same core over the
+same protocol. It is optional and independent: `scripts/install-extension.ps1`
+builds and installs it into VS Code, Cursor or VSCodium. The app does not need
+it, and its absence does not affect the app.
