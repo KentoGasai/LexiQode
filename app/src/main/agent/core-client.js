@@ -110,6 +110,10 @@ class CoreClient {
     return this.request('POST', path, body ?? {});
   }
 
+  put(path, body) {
+    return this.request('PUT', path, body ?? {});
+  }
+
   /**
    * Follow `/api/events` until stopped.
    *

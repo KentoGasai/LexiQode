@@ -178,8 +178,10 @@ class AgentService {
   }
 
   async approval({ requestId, approved, reason }) {
+    // The field is named `id` by the core's route, not `request_id`; sending the
+    // other name produced a 400 that looked like the approval had been ignored.
     return this.#require().post('/api/approval', {
-      request_id: requestId,
+      id: requestId,
       approved: Boolean(approved),
       reason: reason || ''
     });
@@ -197,8 +199,8 @@ class AgentService {
 
   async saveProfile(patch) {
     await this.ensureStarted();
-    const result = await this.#require().post('/api/settings', patch);
-    return result;
+    // Settings are replaced, not created: the core exposes this route as PUT.
+    return this.#require().put('/api/settings', patch);
   }
 
   async complete({ prompt, system, model }) {
