@@ -1,14 +1,15 @@
 name: app
 
-# Two jobs, because they cost very different amounts of time. `verify` runs both
-# test suites in seconds on Linux and is the gate; `package` runs on Windows,
-# where the portable bundle can actually be produced, and is the only thing that
-# produces an artifact. A broken test therefore never spends a Windows runner.
-
+# Manual only, deliberately. This ran on every push, which meant a failing run and
+# a notification for work that had already been tested on the machine it was
+# written on. The two suites are two commands locally:
+#
+#     cd core;  python -m pytest tests -q
+#     cd app;   npm test
+#
+# Run this workflow from the Actions tab when a build artifact is actually
+# wanted. Deleting the file turns it off completely.
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
 
 jobs:

@@ -1275,13 +1275,17 @@ kbd {
 }
 
 .modelist {
-  position: absolute;
+  /* Fixed and appended to the body: the composer row scrolls, and a child of a
+     scrolling box is clipped by it. */
+  position: fixed;
   left: 0;
-  bottom: calc(100% + 6px);
-  z-index: 30;
+  top: 0;
+  z-index: 60;
   display: grid;
   gap: 1px;
   width: min(320px, 78vw);
+  max-height: 46vh;
+  overflow-y: auto;
   padding: 4px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);

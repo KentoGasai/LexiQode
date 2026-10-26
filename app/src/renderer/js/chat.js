@@ -335,7 +335,9 @@ export function createChat({ api, bus, settings, onNotice, editor }) {
       // and the tooltip says where the name came from.
       modesHost.lastChild.title = state.mode;
     }
-    if (state.modeOpen) modesHost.append(renderModeList());
+    // The popup is not a child of this row: the row scrolls horizontally, and an
+    // absolutely positioned child of a scrolling box is clipped to it - which is
+    // exactly how a dropdown ends up present in the DOM and invisible on screen.
   }
 
   function renderModeList() {
@@ -367,14 +369,41 @@ export function createChat({ api, bus, settings, onNotice, editor }) {
     return list;
   }
 
+  let modePopup = null;
+
+  /** Place the list above the button, inside the window, and keep it there. */
+  function showModePopup() {
+    hideModePopup();
+    const button = modesHost.querySelector('.modebtn');
+    if (!button) return;
+    const list = renderModeList();
+    document.body.append(list);
+    const anchor = button.getBoundingClientRect();
+    const size = list.getBoundingClientRect();
+    const left = Math.min(Math.max(8, anchor.left), Math.max(8, window.innerWidth - size.width - 8));
+    const top = Math.max(8, anchor.top - size.height - 6);
+    list.style.left = `${left}px`;
+    list.style.top = `${top}px`;
+    modePopup = list;
+  }
+
+  function hideModePopup() {
+    if (modePopup) {
+      modePopup.remove();
+      modePopup = null;
+    }
+  }
+
   function toggleModeList(open) {
     state.modeOpen = open;
     renderModes();
+    if (open) showModePopup();
+    else hideModePopup();
   }
 
   function chooseMode(id) {
     state.mode = id;
-    state.modeOpen = false;
+    toggleModeList(false);
     renderModes();
     void api.settings.update({ agent: { defaultMode: id } }).catch(() => {});
     input.focus();
@@ -540,6 +569,13 @@ export function createChat({ api, bus, settings, onNotice, editor }) {
      * character.
      */
     let scanned = '';
+    const retryButton = () =>
+      el('button', {
+        class: 'btn btn--ghost',
+        type: 'button',
+        text: t('settings.scanAgain'),
+        onclick: () => void scanModels({ force: true })
+      });
     async function scanModels({ force = false } = {}) {
       const endpoint = baseUrl.value.trim();
       if (!endpoint) {
@@ -563,6 +599,7 @@ export function createChat({ api, bus, settings, onNotice, editor }) {
         clear(models);
         if (!names.length) {
           models.append(el('span', { text: t('settings.scanNone') }));
+          models.append(retryButton());
           return;
         }
         models.append(el('span', { text: t('settings.scanFound', { count: names.length }) }));
@@ -584,7 +621,11 @@ export function createChat({ api, bus, settings, onNotice, editor }) {
         models.append(picker);
       } catch (error) {
         clear(models);
-        models.append(el('span', { text: error.message }));
+        // "no folder is open" is the one failure a user can act on, and it is the
+        // one the core states in English only.
+        const message = /no folder/i.test(error.message) ? t('chat.needsFolder') : error.message;
+        models.append(el('span', { text: message }));
+        models.append(retryButton());
       }
     }
 
@@ -594,7 +635,7 @@ export function createChat({ api, bus, settings, onNotice, editor }) {
     // The window's own language, next to the agent's settings because this is
     // the only settings surface the interface has.
     const language = el('select', {
-      class: 'modelpick',
+      class: 'langpick',
       onchange: () => void api.settings.update({ appearance: { language: language.value } }).catch(() => {})
     });
     for (const code of ['system', ...i18nInfo().available]) {
@@ -731,6 +772,9 @@ export function createChat({ api, bus, settings, onNotice, editor }) {
   document.addEventListener('click', () => {
     if (state.modeOpen) toggleModeList(false);
   });
+  window.addEventListener('resize', () => {
+    if (state.modeOpen) toggleModeList(false);
+  });
 
   async function mount() {
     clear(actions);
@@ -780,6 +824,7 @@ export function createChat({ api, bus, settings, onNotice, editor }) {
     state.tools.clear();
     state.approvals.clear();
     state.modeOpen = false;
+    hideModePopup();
     await loadState();
     await loadHistory();
     renderContext();

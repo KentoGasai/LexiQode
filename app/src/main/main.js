@@ -86,7 +86,11 @@ function buildServices() {
   const agent = new AgentService({
     workspace,
     onEvent: (payload) => send(CHANNELS.agent.event, payload),
-    onStatus: (payload) => send(CHANNELS.agent.statusChanged, payload)
+    onStatus: (payload) => send(CHANNELS.agent.statusChanged, payload),
+    // The core says why it failed on stderr, and that text is the only place
+    // where a model or endpoint problem is stated. It goes to the application's
+    // own output so that running the app from a terminal shows the reason.
+    onLog: (line) => console.log(`[agent] ${line}`)
   });
 
   let lastLanguage = settings.get().appearance.language;

@@ -148,6 +148,7 @@
   "settings.scanNone": "The endpoint listed no models.",
   "settings.scanFound": "{count} models offered. Click one to use it:",
   "settings.useModel": "Use this model id",
+  "settings.scanAgain": "Ask again",
   "settings.language": "window language",
   "settings.languageSystem": "follow the system",
 

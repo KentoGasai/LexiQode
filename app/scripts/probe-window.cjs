@@ -14,6 +14,7 @@
  */
 
 const { spawn } = require('node:child_process');
+const http = require('node:http');
 const path = require('node:path');
 
 const APP = path.resolve(__dirname, '..');
@@ -25,6 +26,26 @@ const ELECTRON = process.env.LEXIQODE_PROBE_EXE || path.join(APP, 'node_modules'
 const ELECTRON_ARGS = process.env.LEXIQODE_PROBE_EXE ? [`--remote-debugging-port=${PORT}`] : ['.', `--remote-debugging-port=${PORT}`];
 const ELECTRON_CWD = process.env.LEXIQODE_PROBE_EXE ? path.dirname(ELECTRON) : APP;
 const WORKSPACE = process.argv[2] || path.resolve(APP, '..');
+const STUB_PORT = 8715;
+
+/**
+ * A minimal OpenAI-compatible endpoint, so the settings form can be tested the
+ * way it is used: point it somewhere real and expect a model list back.
+ */
+function startStub() {
+  const server = http.createServer((request, response) => {
+    const reply = (payload) => {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify(payload));
+    };
+    if (request.url && request.url.endsWith('/models')) {
+      reply({ object: 'list', data: [{ id: 'stub-model-a' }, { id: 'stub-model-b' }] });
+      return;
+    }
+    reply({ choices: [{ message: { role: 'assistant', content: 'stub' }, finish_reason: 'stop' }] });
+  });
+  return new Promise((resolve) => server.listen(STUB_PORT, '127.0.0.1', () => resolve(server)));
+}
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -271,8 +292,24 @@ const CHECKS = [
       await new Promise((resolve) => setTimeout(resolve, 300));
       const list = document.querySelector('.modelist');
       const items = list ? [...list.querySelectorAll('.modelist__item')] : [];
+      // Presence in the DOM is not visibility: a popup inside a scrolling parent
+      // is present and clipped to nothing. The geometry is what matters, and
+      // hit-testing the centre proves it is the thing on top there.
+      let geometry = null;
+      if (list) {
+        const rect = list.getBoundingClientRect();
+        const centre = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+        geometry = {
+          width: Math.round(rect.width),
+          height: Math.round(rect.height),
+          onScreen: rect.top >= 0 && rect.left >= 0 && rect.bottom <= window.innerHeight,
+          hitTestInside: Boolean(centre && list.contains(centre)),
+          parent: list.parentElement ? list.parentElement.tagName : null
+        };
+      }
       const state = {
         present: true,
+        geometry,
         closedLabel: label ? label.textContent : '',
         iconsInButton: iconCount,
         expanded: button.getAttribute('aria-expanded'),
@@ -311,10 +348,52 @@ const CHECKS = [
         scanText: sheet.querySelector('.list__empty') ? sheet.querySelector('.list__empty').textContent.slice(0, 70) : ''
       };
     `
+  },
+  {
+    label: 'typing an endpoint and a key fetches the model list',
+    expression: `
+      const openSettings = () => document.querySelector('#chat-actions .iconbtn:nth-child(2)').click();
+      let sheet = document.querySelector('#transcript .commit');
+      if (!sheet) {
+        openSettings();
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        sheet = document.querySelector('#transcript .commit');
+      }
+      if (!sheet) return { ran: false, reason: 'the settings form did not open' };
+      const rows = [...sheet.querySelectorAll('.field__row')];
+      const controls = rows.map((row) => row.querySelector('input, select'));
+      const endpoint = controls[1];
+      const key = controls[2];
+      endpoint.value = 'http://127.0.0.1:${STUB_PORT}/v1';
+      endpoint.dispatchEvent(new Event('input', { bubbles: true }));
+      key.value = 'stub-key';
+      key.dispatchEvent(new Event('input', { bubbles: true }));
+      // Long enough for a slow endpoint to answer, and the scan area is watched
+      // rather than a selector that could match another dropdown on the form.
+      const scanArea = sheet.lastElementChild.previousElementSibling;
+      let picker = null;
+      for (let attempt = 0; attempt < 60; attempt += 1) {
+        picker = scanArea.querySelector('select.modelpick');
+        if (picker) break;
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+      return {
+        ran: true,
+        rowCount: rows.length,
+        scanText: [...scanArea.querySelectorAll('.list__empty, .spinner')]
+          .map((node) => node.textContent || '(spinner)')
+          .join(' | ')
+          .slice(0, 220),
+        scanHtml: scanArea.innerHTML.slice(0, 200),
+        hasPicker: Boolean(picker),
+        options: picker ? [...picker.options].map((option) => option.value) : []
+      };
+    `
   }
 ];
 
 async function main() {
+  const stub = await startStub();
   const child = spawn(ELECTRON, ELECTRON_ARGS, {
     cwd: ELECTRON_CWD,
     env: { ...process.env, ELECTRON_ENABLE_LOGGING: '1', LEXIQODE_PROBE: '1' },
@@ -349,6 +428,7 @@ async function main() {
     }
   } finally {
     child.kill();
+    stub.close();
   }
 
   console.log('\n=== console noise from the app ===');

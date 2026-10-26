@@ -148,6 +148,7 @@
   "settings.scanNone": "Сервер не сообщил ни одной модели.",
   "settings.scanFound": "Доступно моделей: {count}. Нажмите, чтобы подставить:",
   "settings.useModel": "Подставить этот идентификатор",
+  "settings.scanAgain": "Спросить снова",
   "settings.language": "язык окна",
   "settings.languageSystem": "как в системе",
 
