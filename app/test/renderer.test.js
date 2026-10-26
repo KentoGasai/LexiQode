@@ -124,8 +124,14 @@ test('the settings form sends only the fields the core documents', () => {
     'base_url',
     'api_key',
     'model',
+    // ModelProfile slots: the window the model accepts and the room an answer
+    // needs. Both were already stored by the core and had no field in the form.
+    'context_window',
+    'max_output_tokens',
     'max_steps',
     'command_timeout',
+    // AgentSettings: when the conversation is compacted.
+    'compact_at',
     'auto_approve',
     'approve_writes',
     'approve_commands'

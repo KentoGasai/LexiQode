@@ -1094,30 +1094,75 @@ kbd {
   color: var(--text);
 }
 
-.tool {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 8px;
+/*
+ * The tools of one turn: a single line, with the individual calls a click away.
+ *
+ * They used to be one full-width row each, which is how a five-call turn buried
+ * its own answer under a column of `read_file` entries.
+ */
+.tools {
+  min-width: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface-2);
-  min-width: 0;
-  cursor: default;
 }
 
-.tool[data-state="running"] {
-  border-color: var(--accent);
+.tools[data-state="running"] {
+  border-color: var(--accent-soft);
 }
 
-.tool[data-state="failed"] {
+.tools[data-state="failed"] {
   border-color: var(--danger);
 }
 
-.tool__name {
-  font-family: var(--mono);
+.tools__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  color: var(--text-faint);
   font-size: 11.5px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.tools__rows {
+  display: grid;
+  gap: 2px;
+  padding: 0 6px 6px;
+}
+
+.toolrow {
+  min-width: 0;
+  border-radius: var(--radius-sm);
+}
+
+.toolrow__head {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  list-style: none;
+}
+
+.toolrow__head:hover {
+  background: var(--surface-3);
+}
+
+.toolrow[data-state="running"] .toolrow__name {
+  color: var(--accent);
+}
+
+.toolrow[data-state="failed"] .toolrow__name {
+  color: var(--danger);
+}
+
+.toolrow__name {
+  font-family: var(--mono);
+  font-size: 11px;
   color: var(--text);
   min-width: 0;
   overflow: hidden;
@@ -1125,7 +1170,7 @@ kbd {
   white-space: nowrap;
 }
 
-.tool__detail {
+.toolrow__args {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1134,10 +1179,37 @@ kbd {
   font-size: 11px;
 }
 
-.tool__state {
+.toolrow__state {
   color: var(--text-faint);
-  font-size: 11px;
+  font-size: 10.5px;
   white-space: nowrap;
+}
+
+.toolrow__body {
+  padding: 2px 8px 8px 20px;
+}
+
+.toolrow__label {
+  margin-bottom: 3px;
+  color: var(--text-faint);
+  font-size: 10.5px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.toolrow__pre {
+  margin: 0 0 6px;
+  padding: 6px 8px;
+  max-height: 200px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .spinner {
@@ -1179,19 +1251,76 @@ kbd {
   gap: 6px;
 }
 
+/*
+ * The model's scratchpad: open while it thinks, folded once it answers, and
+ * always above the answer it explains.
+ */
 .reasoning {
-  padding: 6px 8px;
-  border-left: 2px solid var(--model);
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
   color: var(--text-dim);
-  font-size: 12px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  max-height: 180px;
-  overflow: auto;
+  font-size: 11.5px;
 }
 
-.reasoning[hidden] {
-  display: none;
+.reasoning__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  color: var(--text-faint);
+  cursor: pointer;
+  list-style: none;
+}
+
+/* The disclosure arrow, drawn rather than borrowed from the platform. */
+.reasoning__head::before,
+.tools__head::before,
+.toolrow__head::before {
+  content: '';
+  flex: 0 0 auto;
+  width: 5px;
+  height: 5px;
+  margin-right: 2px;
+  border-right: 1.6px solid currentColor;
+  border-bottom: 1.6px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 0.12s ease;
+}
+
+.reasoning[open] > .reasoning__head::before,
+.tools[open] > .tools__head::before,
+.toolrow[open] > .toolrow__head::before {
+  transform: rotate(45deg);
+}
+
+.reasoning__label {
+  font-weight: 600;
+}
+
+.reasoning__spent {
+  color: var(--text-faint);
+}
+
+.reasoning__body {
+  margin: 0 8px 6px 14px;
+  padding-left: 8px;
+  max-height: 240px;
+  overflow: auto;
+  border-left: 2px solid var(--model);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Neither a message nor an error: what the agent had to do to itself. */
+.notice {
+  margin-bottom: 10px;
+  padding: 4px 8px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  font-size: 11px;
 }
 
 .composer {
@@ -1233,6 +1362,22 @@ kbd {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* How full the model's window is: the one number that explains a compaction. */
+.ctx--meter {
+  font-variant-numeric: tabular-nums;
+}
+
+.ctx--meter[data-state="full"] {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.tools__head::-webkit-details-marker,
+.toolrow__head::-webkit-details-marker,
+.reasoning__head::-webkit-details-marker {
+  display: none;
 }
 
 .composer__input {

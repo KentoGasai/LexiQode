@@ -15,11 +15,33 @@
  * Modes live in the composer, at the bottom, because that is where the decision
  * is made: what the next message is allowed to do. The header carries status
  * only.
+ *
+ * Three things about a turn are worth reading twice, because all three were
+ * wrong in a way that looked like working software.
+ *
+ * * The model's scratchpad is folded into one disclosure above the answer, open
+ *   while it is still thinking. It used to be drawn as a second assistant turn
+ *   appended after the first, which put the thinking under the answer it exists
+ *   to explain.
+ * * Tool calls are one collapsed line per turn. They used to be a full-width row
+ *   each, which buried the answer under a wall of `read_file` entries and showed
+ *   `[object Object]` for the arguments, since the core sends them as an object.
+ * * How full the model's window is, and that the conversation is compacted
+ *   before it overflows, is stated in the composer rather than discovered.
  */
 
 import { clear, debounce, el, icon, toast } from './ui.js';
-import { renderMarkdown, toPlainText } from './markdown.js';
+import { renderMarkdown } from './markdown.js';
 import { agentStateKey, current as i18nInfo, t } from './i18n.js';
+import { describeArguments, formatTokens } from './tool-arguments.js';
+
+/**
+ * The marker the core puts on the message that replaces a summarised part of a
+ * conversation (`core/lexiqode/agent/loop.py`). It is a user-role message on the
+ * wire, so without this the panel would draw the summary as something the user
+ * said.
+ */
+const SUMMARY_MARKER = '[context summary]';
 
 /**
  * The five modes, by id: an icon and the two keys that name them.
@@ -72,6 +94,7 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
     reasoning: null,
     tools: new Map(),
     approvals: new Map(),
+    context: null,
     settingsOpen: false,
     modeOpen: false
   };
@@ -121,9 +144,13 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
     if (created.meta) {
       clear(created.meta);
       if (streaming) {
-        created.meta.append(el('span', { class: 'spinner' }), el('span', { text: 'working' }));
+        created.meta.append(el('span', { class: 'spinner' }), el('span', { text: t('chat.working2') }));
       } else if (created.steps) {
-        created.meta.append(el('span', { text: `${created.steps} step${created.steps === 1 ? '' : 's'}` }));
+        created.meta.append(
+          el('span', {
+            text: t(created.steps === 1 ? 'chat.stepsOne' : 'chat.steps', { count: created.steps })
+          })
+        );
       }
     }
     for (const link of created.body.querySelectorAll('a[data-external]')) {
@@ -134,53 +161,195 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
     }
   }
 
-  function reasoningBlock() {
-    if (!state.reasoning) {
-      const created = turn('assistant');
-      created.node.classList.add('turn--reasoning');
-      created.reasoningNode = el('div', { class: 'reasoning' });
-      created.node.insertBefore(created.reasoningNode, created.body);
-      created.reasoningNode.hidden = false;
-      created.text = '';
-      state.reasoning = created;
-    }
-    return state.reasoning;
+  /** The turn the current event belongs to, created on demand. */
+  function activeTurn() {
+    if (!state.current) state.current = addAssistant();
+    return state.current;
   }
 
-  function toolRow(payload, phase) {
-    const id = String(payload.id || payload.call_id || payload.tool_call_id || payload.name || Math.random());
-    let created = state.tools.get(id);
-    if (!created) {
-      created = {
-        name: payload.name || payload.tool || 'tool',
-        detail: payload.arguments || payload.args || payload.input || '',
-        result: '',
-        node: el('div', { class: 'tool', dataset: { state: 'running' } })
-      };
-      created.label = el('span', { class: 'tool__name', text: created.name });
-      created.detailNode = el('span', { class: 'tool__detail' });
-      created.stateNode = el('span', { class: 'tool__state' });
-      created.node.append(created.label, created.detailNode, created.stateNode);
-      transcript.append(created.node);
-      state.tools.set(id, created);
+  /**
+   * The model's scratchpad, folded into one disclosure above the answer.
+   *
+   * It arrives as `reasoning_delta` before the answer does, so it is inserted as
+   * the first child of this turn rather than as a turn of its own. It stays open
+   * while the model is thinking - that is what makes a slow first token bearable -
+   * and folds away as soon as the answer starts, which is also the state a
+   * conversation is worth re-reading in.
+   */
+  function reasoningBlock() {
+    const created = activeTurn();
+    if (!created.reasoning) {
+      const node = el('details', { class: 'reasoning', open: true });
+      const head = el('summary', { class: 'reasoning__head' });
+      const spinner = el('span', { class: 'spinner' });
+      const label = el('span', { class: 'reasoning__label', text: t('chat.thinking') });
+      const spent = el('span', { class: 'reasoning__spent' });
+      const body = el('div', { class: 'reasoning__body' });
+      head.append(spinner, label, spent);
+      node.append(head, body);
+      // Above the answer, and above the tools when those came first.
+      created.node.insertBefore(node, created.tools ? created.tools.node : created.body);
+      created.reasoning = { node, body, head, label, spent, spinner, startedAt: Date.now(), folded: false, toggled: false };
+      // A click is the user's decision, and it outranks the automatic fold.
+      head.addEventListener('click', () => {
+        created.reasoning.toggled = true;
+      });
     }
-    if (payload.name || payload.tool) created.name = payload.name || payload.tool;
+    state.reasoning = created.reasoning;
+    return created.reasoning;
+  }
+
+  /** Say that the model is thinking again, after it already had an answer. */
+  function markThinking(record) {
+    record.folded = false;
+    record.node.open = true;
+    if (!record.spinner.isConnected) record.head.insertBefore(record.spinner, record.label);
+    record.label.textContent = t('chat.thinking');
+    record.spent.textContent = '';
+  }
+
+  /**
+   * Fold the scratchpad away and date it, unless the user already decided.
+   *
+   * The label says how long the model thought, because that is the one fact a
+   * reader wants from a folded block they chose not to open.
+   */
+  function foldThinking() {
+    const record = state.reasoning;
+    if (!record || record.folded || record.toggled || !record.body.textContent) return;
+    record.folded = true;
+    record.node.open = false;
+    record.spinner.remove();
+    record.label.textContent = t('chat.thoughts', {
+      seconds: Math.max(1, Math.round((Date.now() - record.startedAt) / 1000))
+    });
+  }
+
+  /**
+   * One collapsed line for every tool the turn used.
+   *
+   * The rows are still there, one click away, with the arguments the model
+   * actually sent; what is gone is the wall of them between the question and the
+   * answer.
+   */
+  function toolGroup() {
+    const created = activeTurn();
+    if (!created.tools) {
+      const node = el('details', { class: 'tools' });
+      const head = el('summary', { class: 'tools__head' });
+      const spinner = el('span', { class: 'spinner' });
+      const label = el('span', { class: 'tools__label' });
+      const rows = el('div', { class: 'tools__rows' });
+      head.append(spinner, label);
+      node.append(head, rows);
+      // Immediately before the answer: the order things happened in.
+      created.node.insertBefore(node, created.body);
+      created.tools = { node, head, label, spinner, rows, count: 0, running: 0, failed: 0 };
+    }
+    return created.tools;
+  }
+
+  function renderToolGroup(group) {
+    if (!group) return;
+    const count = group.count;
+    const key = group.running ? 'chat.toolsWorking' : count === 1 ? 'chat.toolsOne' : 'chat.tools';
+    group.label.textContent = t(key, { count });
+    group.node.dataset.state = group.running ? 'running' : group.failed ? 'failed' : 'done';
+    group.spinner.hidden = !group.running;
+  }
+
+  /**
+   * One tool call: a single line while collapsed, the wire arguments and the
+   * result when opened.
+   *
+   * `payload.arguments` is an object - the model's own JSON - and it is shown as
+   * such, as text, with the bulky fields measured rather than printed.
+   */
+  function toolRow(payload, phase) {
+    const group = toolGroup();
+    const id = String(payload.id || payload.call_id || payload.tool_call_id || payload.name || Math.random());
+    let row = state.tools.get(id);
+    if (!row) {
+      row = {
+        name: payload.name || payload.tool || 'tool',
+        args: payload.arguments || payload.args || payload.input || {},
+        result: '',
+        meta: null,
+        elapsed: 0,
+        details: el('details', { class: 'toolrow', dataset: { state: 'running' } })
+      };
+      row.head = el('summary', { class: 'toolrow__head' });
+      row.nameNode = el('span', { class: 'toolrow__name', text: row.name });
+      row.argsNode = el('span', { class: 'toolrow__args' });
+      row.stateNode = el('span', { class: 'toolrow__state', text: t('tool.running') });
+      row.body = el('div', { class: 'toolrow__body' });
+      row.head.append(row.nameNode, row.argsNode, row.stateNode);
+      row.details.append(row.head, row.body);
+      group.rows.append(row.details);
+      group.count += 1;
+      group.running += 1;
+      state.tools.set(id, row);
+    }
+    if (payload.name || payload.tool) row.name = payload.name || payload.tool;
     if (payload.arguments || payload.args || payload.input) {
-      created.detail = payload.arguments || payload.args || payload.input;
+      row.args = payload.arguments || payload.args || payload.input;
     }
     if (phase === 'end') {
-      created.result = payload.result || payload.output || payload.message || '';
+      row.result = String(payload.content || payload.result || payload.output || payload.message || '');
+      row.meta = payload.meta && Object.keys(payload.meta).length ? payload.meta : null;
+      row.elapsed = Number(payload.elapsed_ms) || 0;
       const failed = payload.ok === false || payload.error || payload.status === 'error';
-      created.node.dataset.state = failed ? 'failed' : 'done';
-      created.stateNode.textContent = failed ? t('tool.failed') : t('tool.done');
-    } else {
-      created.node.dataset.state = 'running';
-      created.stateNode.textContent = t('tool.running');
+      row.details.dataset.state = failed ? 'failed' : 'done';
+      row.stateNode.textContent = failed ? t('tool.failed') : t('tool.done');
+      group.running = Math.max(0, group.running - 1);
+      if (failed) group.failed += 1;
+      renderToolRow(row);
     }
-    created.label.textContent = created.name;
-    created.detailNode.textContent = toPlainText(String(created.detail), 90);
-    created.detailNode.title = `${created.name}\n\n${String(created.detail).slice(0, 1200)}\n\n${String(created.result).slice(0, 1200)}`;
+    row.nameNode.textContent = row.name;
+    row.argsNode.textContent = describeArguments(row.name, row.args);
+    row.head.title = [row.name, JSON.stringify(row.args, null, 2), row.result.slice(0, 2000)]
+      .filter(Boolean)
+      .join('\n\n');
+    renderToolGroup(group);
     scrollIfFollowing(atBottom());
+  }
+
+  /** The opened part of a row: what was sent, what came back. */
+  function renderToolRow(row) {
+    clear(row.body);
+    if (row.args && Object.keys(row.args).length) {
+      row.body.append(
+        el('div', { class: 'toolrow__label', text: t('tool.arguments') }),
+        el('pre', { class: 'toolrow__pre', text: JSON.stringify(row.args, null, 2) })
+      );
+    }
+    if (row.meta) {
+      row.body.append(
+        el('div', { class: 'toolrow__label', text: t('tool.meta') }),
+        el('pre', { class: 'toolrow__pre', text: JSON.stringify(row.meta, null, 2) })
+      );
+    }
+    if (row.result) {
+      row.body.append(
+        el('div', {
+          class: 'toolrow__label',
+          text: row.elapsed ? t('tool.resultIn', { ms: row.elapsed }) : t('tool.result')
+        }),
+        el('pre', { class: 'toolrow__pre', text: row.result })
+      );
+    }
+    if (!row.body.childElementCount) {
+      row.body.append(el('div', { class: 'toolrow__label', text: t('tool.noOutput') }));
+    }
+  }
+
+  /** A line in the transcript that is neither a message nor an error. */
+  function addNotice(text) {
+    const node = el('div', { class: 'notice', text });
+    transcript.append(node);
+    state.current = null;
+    scrollIfFollowing(atBottom());
+    return node;
   }
 
   function approvalCard(payload) {
@@ -257,6 +426,10 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
       case 'turn_start':
         state.running = true;
         state.reasoning = null;
+        // Tool ids repeat across turns when a server sends none of its own
+        // (`call_0`, `call_1`), so the map is per turn: keeping it would fold a
+        // new call into last turn's row.
+        state.tools.clear();
         state.current = addAssistant();
         renderRunning();
         break;
@@ -264,6 +437,8 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
         if (state.current && data.step) state.current.steps = data.step;
         break;
       case 'text_delta': {
+        // The answer has started, so the scratchpad folds away.
+        foldThinking();
         if (!state.current) state.current = addAssistant();
         state.current.text += String(data.text || '');
         const following = atBottom();
@@ -272,6 +447,7 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
         break;
       }
       case 'assistant_text': {
+        foldThinking();
         if (!state.current) state.current = addAssistant();
         // The complete text follows the deltas, so it replaces them rather than
         // being appended: appending would duplicate the whole answer.
@@ -281,7 +457,12 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
       }
       case 'reasoning_delta': {
         const block = reasoningBlock();
-        block.reasoningNode.textContent += String(data.text || '');
+        const following = atBottom();
+        // A later step thinks again after answering: it is the same disclosure,
+        // reopened, rather than a second one.
+        if (block.folded) markThinking(block);
+        block.body.textContent += String(data.text || '');
+        scrollIfFollowing(following);
         break;
       }
       case 'tool_start':
@@ -290,11 +471,25 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
       case 'tool_end':
         toolRow(data, 'end');
         break;
+      case 'context_compacted': {
+        // The one thing about the context the user cannot see for themselves.
+        addNotice(
+          t(data.summarised ? 'chat.compacted' : 'chat.compactedDropped', {
+            dropped: data.dropped || 0
+          })
+        );
+        break;
+      }
       case 'turn_end': {
         state.running = false;
         if (state.current) {
           state.current.steps = data.steps || state.current.steps;
           renderAssistant(state.current, false);
+        }
+        // How full the window is now, and whether it was measured or estimated.
+        if (data.context) {
+          state.context = data.context;
+          renderContext();
         }
         state.current = null;
         renderRunning();
@@ -443,6 +638,47 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
         el('span', { class: 'ctx' }, [el('span', { class: 'ctx__label', text: t('chat.unsaved') })])
       );
     }
+    renderContextMeter();
+  }
+
+  /**
+   * How much of the model's window this conversation occupies.
+   *
+   * The two numbers a user cannot otherwise get: what the window is, and whether
+   * the conversation is about to be compacted. `measured` separates a token count
+   * the provider reported from the loop's own four-characters-per-token estimate,
+   * because a gauge that quietly mixes the two is worse than no gauge.
+   */
+  function renderContextMeter() {
+    const context = state.context;
+    if (!context || !context.window) return;
+    const percent = Math.max(0, Math.min(100, Math.round((context.tokens / context.window) * 100)));
+    const compactAt = Math.round(
+      (context.compact_at || settings().agent.compact_at || 0.75) * 100
+    );
+    contextHost.append(
+      el(
+        'span',
+        {
+          class: 'ctx ctx--meter',
+          dataset: { state: percent >= compactAt ? 'full' : 'ok' },
+          title: [
+            t('chat.contextHint', { percent: compactAt }),
+            context.measured ? t('chat.contextMeasured') : t('chat.contextEstimated')
+          ].join(' ')
+        },
+        [
+          el('span', {
+            class: 'ctx__label',
+            text: t('chat.contextUsage', {
+              used: formatTokens(context.tokens),
+              total: formatTokens(context.window),
+              percent
+            })
+          })
+        ]
+      )
+    );
   }
 
   function grow() {
@@ -502,6 +738,10 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
     state.reasoning = null;
     state.tools.clear();
     state.approvals.clear();
+    // A new conversation starts with an almost empty window, and a gauge still
+    // showing the old one would be the first lie the panel tells.
+    state.context = null;
+    renderContext();
     onNotice?.(t('chat.newStarted'), 'ok');
   }
 
@@ -529,6 +769,25 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
       placeholder: profile.has_api_key ? t('settings.apiKeyStored') : 'sk-…'
     });
     const model = el('input', { type: 'text', value: profile.model || '', placeholder: t('settings.modelPlaceholder') });
+    // The window and the answer budget belong to the model, and until now they
+    // existed in the core's settings file and nowhere in the interface: the two
+    // numbers that decide whether a long conversation is even possible could not
+    // be read, let alone changed.
+    const contextWindow = el('input', {
+      type: 'text',
+      value: String(profile.context_window ?? 128000),
+      title: t('settings.contextWindowHint')
+    });
+    const maxOutput = el('input', {
+      type: 'text',
+      value: String(profile.max_output_tokens ?? 8192),
+      title: t('settings.maxOutputHint')
+    });
+    const compactAt = el('input', {
+      type: 'text',
+      value: String(Math.round((agentSettings.compact_at ?? 0.75) * 100)),
+      title: t('settings.autoCompactHint')
+    });
     const maxSteps = el('input', { type: 'text', value: String(agentSettings.max_steps ?? 12) });
     const commandTimeout = el('input', { type: 'text', value: String(agentSettings.command_timeout ?? 120) });
     const autoApprove = el('input', { type: 'checkbox', checked: Boolean(agentSettings.auto_approve) });
@@ -543,11 +802,14 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
         profile: {
           id: id.value.trim() || 'default',
           base_url: baseUrl.value.trim(),
-          model: model.value.trim()
+          model: model.value.trim(),
+          context_window: Number(contextWindow.value) || undefined,
+          max_output_tokens: Number(maxOutput.value) || undefined
         },
         agent: {
           max_steps: Number(maxSteps.value) || undefined,
           command_timeout: Number(commandTimeout.value) || undefined,
+          compact_at: (Number(compactAt.value) || 75) / 100,
           auto_approve: autoApprove.checked,
           approve_writes: approveWrites.checked,
           approve_commands: approveCommands.checked
@@ -691,6 +953,9 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
       field(t('settings.endpoint'), baseUrl),
       field(t('settings.apiKey'), apiKey),
       field(t('settings.model'), model),
+      field(t('settings.contextWindow'), contextWindow),
+      field(t('settings.maxOutput'), maxOutput),
+      field(t('settings.autoCompact'), compactAt),
       field(t('settings.maxSteps'), maxSteps),
       field(t('settings.commandTimeout'), commandTimeout),
       field(t('settings.language'), language),
@@ -752,6 +1017,9 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
       // forever, whatever had been saved.
       onProfile?.(state.profile);
       state.agentSettings = snapshot.agent || {};
+      // The core reports what its window looks like, so a window opened in the
+      // middle of a long conversation draws the gauge before the next turn.
+      if (snapshot.context) state.context = snapshot.context;
       if (Array.isArray(snapshot.modes) && snapshot.modes.length) {
         state.modes = snapshot.modes.map((mode) => ({
           id: mode.id || mode.mode || 'agent',
@@ -769,6 +1037,7 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
         for (const id of snapshot.pending_approvals) approvalCard({ request_id: id });
       }
       renderModes();
+      renderContext();
       if (state.settingsOpen) toggleSettings(true);
     } catch (error) {
       state.agentSettings = {};
@@ -787,6 +1056,13 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
       for (const message of messages) {
         const text = stripContext(String(message.content || ''));
         if (!text.trim()) continue;
+        // A summarised part of the conversation is a user-role message on the
+        // wire. Drawing it as a bubble would put words in the user's mouth; it
+        // is a note about what the agent no longer remembers.
+        if (text.startsWith(SUMMARY_MARKER)) {
+          transcript.append(el('div', { class: 'notice', text: t('chat.compactedHistory') }));
+          continue;
+        }
         if (message.role === 'user') addUser(text);
         else if (message.role === 'assistant') {
           const created = addAssistant();

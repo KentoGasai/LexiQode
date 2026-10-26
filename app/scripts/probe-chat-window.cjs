@@ -32,7 +32,7 @@ function stub() {
     request.on('data', (chunk) => {
       body += chunk;
     });
-    request.on('end', () => {
+    request.on('end', async () => {
       requests.push({ url: request.url, method: request.method });
       if (request.url.endsWith('/models')) {
         response.writeHead(200, { 'content-type': 'application/json' });
@@ -54,10 +54,66 @@ function stub() {
       }
       if (stream) {
         response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
-        for (const piece of ['The ', 'stub ', 'answered.']) {
-          response.write(`data: ${JSON.stringify({ choices: [{ delta: { content: piece } }] })}\n\n`);
+        // Paced deliberately: a stub that answers instantly makes the whole turn
+        // shorter than the probe's sampling interval, so the state *during* the
+        // turn - thinking shown, tools running - could never be observed and a
+        // panel that never opened the thinking block would pass.
+        const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+        const send = (delta) =>
+          response.write(`data: ${JSON.stringify({ choices: [{ delta }] })}\n\n`);
+        // A turn shaped like a real one: the model thinks, asks for a read-only
+        // tool, reads the result and answers. The reasoning arrives on its own
+        // field, which is what a reasoning model does and what the panel has to
+        // fold away instead of printing as the answer.
+        const usedTool = (asked.messages || []).some((message) => message.role === 'tool');
+        if (!usedTool) {
+          await pause(300);
+          for (const piece of ['The question needs ', 'a look at the project ', 'before I answer.']) {
+            send({ reasoning_content: piece });
+            await pause(200);
+          }
+          send({ content: 'Let me look at the project first. ' });
+          await pause(300);
+          response.write(
+            `data: ${JSON.stringify({
+              choices: [
+                {
+                  delta: {
+                    tool_calls: [
+                      {
+                        index: 0,
+                        id: 'call_probe_1',
+                        type: 'function',
+                        function: { name: 'glob', arguments: JSON.stringify({ pattern: '*.md' }) }
+                      }
+                    ]
+                  }
+                }
+              ]
+            })}\n\n`
+          );
+          response.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'tool_calls' }] })}\n\n`);
+        } else {
+          for (const piece of ['The listing is ', 'enough to answer.']) {
+            send({ reasoning_content: piece });
+            await pause(200);
+          }
+          for (const piece of ['The ', 'stub ', 'answered.']) {
+            send({ content: piece });
+            await pause(120);
+          }
+          response.write(
+            `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] })}\n\n`
+          );
+          // A measured token count, so the meter in the composer has something
+          // real to show rather than its own estimate.
+          response.write(
+            `data: ${JSON.stringify({
+              choices: [],
+              usage: { prompt_tokens: 900, completion_tokens: 120, total_tokens: 1020 }
+            })}\n\n`
+          );
         }
-        response.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] })}\n\n`);
         response.write('data: [DONE]\n\n');
         response.end();
         return;
@@ -224,6 +280,38 @@ async function main() {
       const send = document.getElementById('composer-send');
       steps.sendClicked = { disabled: send.disabled, text: send.textContent.trim() };
       send.click();
+      // While the turn runs: the scratchpad is open and the tools line says it is
+      // working. A folded-away thinking block that was never open is not the same
+      // thing, and only a sample taken during the turn can tell them apart.
+      const mid = {
+        reasoningOpenWhileThinking: null,
+        reasoningLabelWhileThinking: '',
+        toolsLabelWhileRunning: '(never seen)',
+        toolsOpenWhileRunning: null
+      };
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        await sleep(80);
+        const turn = [...document.querySelectorAll('.turn--assistant')].pop();
+        const reasoning = turn ? turn.querySelector('details.reasoning') : null;
+        if (reasoning && mid.reasoningOpenWhileThinking === null) {
+          mid.reasoningOpenWhileThinking = reasoning.open;
+          mid.reasoningLabelWhileThinking = reasoning
+            .querySelector('summary')
+            .textContent.replace(/\\s+/g, ' ')
+            .trim();
+        }
+        const tools = turn ? turn.querySelector('details.tools') : null;
+        if (tools && mid.toolsLabelWhileRunning === '(never seen)') {
+          mid.toolsLabelWhileRunning = tools
+            .querySelector('summary')
+            .textContent.replace(/\\s+/g, ' ')
+            .trim();
+          mid.toolsOpenWhileRunning = tools.open;
+        }
+        const stop = document.getElementById('composer-stop');
+        if (mid.reasoningOpenWhileThinking !== null && stop && stop.hidden) break;
+      }
+      steps.midTurn = mid;
       // And the title bar's folder button, which is the way to change folder.
       const folderButton = document.getElementById('titlebar-folder');
       steps.folderButton = {
@@ -231,12 +319,20 @@ async function main() {
         label: folderButton ? folderButton.textContent.trim() : '',
         title: folderButton ? folderButton.title.split('\\n')[0] : ''
       };
+      // The stop button is shown only while a turn runs, so it is the wait
+      // condition that does not depend on the window's language: an earlier
+      // version of this probe waited on the English word "working" and broke out
+      // of the loop on its first pass.
       let answered = '';
-      for (let attempt = 0; attempt < 120; attempt += 1) {
-        await sleep(500);
+      let body = null;
+      for (let attempt = 0; attempt < 150; attempt += 1) {
+        await sleep(400);
         const turns = [...document.querySelectorAll('.turn--assistant')];
-        answered = turns.length ? turns[turns.length - 1].textContent.replace(/\\s+/g, ' ').trim() : '';
-        if (answered && !/working/i.test(document.getElementById('composer-send').textContent)) break;
+        const turn = turns[turns.length - 1] || null;
+        body = turn ? turn.querySelector('.turn__body') : null;
+        answered = body ? body.textContent.replace(/\\s+/g, ' ').trim() : '';
+        const stop = document.getElementById('composer-stop');
+        if (/stub answered/.test(answered) && stop && stop.hidden) break;
       }
       steps.turn = {
         rawEvents: rawEvents.slice(0, 40),
@@ -244,6 +340,45 @@ async function main() {
         answer: answered.slice(0, 200),
         errors: [...document.querySelectorAll('.turn--error, .card--error')].map((node) => node.textContent.replace(/\\s+/g, ' ').trim().slice(0, 200)),
         transcript: transcriptText().slice(0, 300)
+      };
+      // What the reader is looking at: the scratchpad folded above the answer,
+      // the tools on one line, and how full the model's window is. Each of these
+      // was reported as wrong, so each is measured rather than described.
+      const finalTurn = [...document.querySelectorAll('.turn--assistant')].pop();
+      const reasoning = finalTurn ? finalTurn.querySelector('details.reasoning') : null;
+      const reasoningBody = reasoning ? reasoning.querySelector('.reasoning__body') : null;
+      const tools = finalTurn ? finalTurn.querySelector('details.tools') : null;
+      const meter = document.querySelector('.ctx--meter');
+      steps.presentation = {
+        reasoningTag: reasoning ? reasoning.tagName : '(missing)',
+        reasoningCollapsedAfterTurn: reasoning ? !reasoning.open : null,
+        reasoningLabel: reasoning
+          ? reasoning.querySelector('summary').textContent.replace(/\\s+/g, ' ').trim()
+          : '',
+        reasoningChars: reasoningBody ? reasoningBody.textContent.length : 0,
+        reasoningAboveAnswer: reasoning && body
+          ? Boolean(reasoning.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING)
+          : null,
+        toolsTag: tools ? tools.tagName : '(missing)',
+        toolsCollapsedAfterTurn: tools ? !tools.open : null,
+        toolsLabel: tools ? tools.querySelector('summary').textContent.replace(/\\s+/g, ' ').trim() : '',
+        toolRows: finalTurn
+          ? [...finalTurn.querySelectorAll('.toolrow')].map((row) => {
+              const name = row.querySelector('.toolrow__name');
+              const args = row.querySelector('.toolrow__args');
+              const result = row.querySelector('.toolrow__pre');
+              return {
+                name: name ? name.textContent : '',
+                args: args ? args.textContent : '',
+                state: row.getAttribute('data-state'),
+                resultChars: result ? result.textContent.length : 0
+              };
+            })
+          : [],
+        objectObjectInTurn: finalTurn ? finalTurn.textContent.includes('[object Object]') : null,
+        transcriptNodes: document.getElementById('transcript').children.length,
+        contextMeter: meter ? meter.textContent.replace(/\\s+/g, ' ').trim() : '(missing)',
+        contextMeterTitle: meter ? meter.title : ''
       };
       // Read late: the status bar is written when the panel learns the profile,
       // and an earlier read measures the wrong moment.
