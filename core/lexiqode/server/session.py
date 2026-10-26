@@ -26,6 +26,7 @@ from ..agent.modes import MODES, AgentMode, catalogue, get_mode
 from ..agent.tools.base import ApprovalDecision, ApprovalRequest
 from ..agent.tools.registry import ToolRegistry, default_registry
 from ..config import ModelProfile, Settings, sessions_dir
+from ..conversations import ConversationStore, title_from
 from ..errors import ConfigError, WorkspaceError
 from ..llm.openai import OpenAIChatClient
 from ..llm.types import system_message, user_message
@@ -118,7 +119,22 @@ class CoreSession:
         self._loop: AgentLoop | None = None
         self._turn = TurnState()
         self._thread: threading.Thread | None = None
+        self._conversation_id = ""
         self.validate_workspace()
+
+        # Chats belong to the folder, and the folder belongs to the process: the
+        # store is built once, here, so a turn and a listing see the same files.
+        # Built after validation, because the store keeps the resolved path.
+        self.conversations = ConversationStore(self._workspace)
+        # A folder that was used before this existed has its transcript in the
+        # single per-folder file. Importing it as the first conversation is what
+        # keeps an upgrade from looking like lost history.
+        if not self.conversations.list():
+            legacy = load_history(self._workspace)
+            if legacy:
+                self._conversation_id = self.conversations.create(
+                    messages=legacy, title=title_from(legacy)
+                )["id"]
 
     @property
     def workspace(self) -> Path:
@@ -175,11 +191,135 @@ class CoreSession:
                 registry=self.registry,
                 emit=self.bus.emit,
                 approve=self._approver,
-                history=load_history(self._workspace),
+                # The open chat's messages, so switching chat is switching what
+                # the model is looking at rather than clearing its memory.
+                history=self.conversation_messages(),
                 extra_rules=self.project_rules(),
                 client=self._client_factory(profile) if self._client_factory else None,
             )
             return self._loop
+
+    # ----------------------------------------------------------- conversations
+    def conversation_messages(self) -> list[dict[str, Any]]:
+        """The messages of the open chat, loading it if it is not open yet."""
+
+        if not self._conversation_id:
+            latest = self.conversations.latest()
+            self._conversation_id = (
+                latest["id"] if latest else self.conversations.create()["id"]
+            )
+        record = self.conversations.read(self._conversation_id)
+        if record is None:
+            # Deleted behind our back, or never written: a fresh chat is better
+            # than a session that cannot answer.
+            self._conversation_id = self.conversations.create()["id"]
+            return []
+        return list(record.get("messages") or [])
+
+    def history_messages(self) -> list[dict[str, Any]]:
+        """What is in the open chat right now, whether or not a turn has run.
+
+        A turn is not the only way messages appear: opening a saved chat loads a
+        transcript, and the window has to draw it before the next question. The
+        loop is built on demand - and when the profile is not usable yet it is not
+        built at all, because an unconfigured core still has a conversation to
+        show rather than an error.
+        """
+
+        if self._loop is not None:
+            return self._loop.messages
+        try:
+            return self.loop().messages
+        except ConfigError:
+            return self.conversation_messages()
+
+    def current_conversation(self) -> dict[str, Any]:
+        """The open chat as the window shows it: id, title, size."""
+
+        messages = self.conversation_messages()
+        record = self.conversations.read(self._conversation_id) or {}
+        title = record.get("title") or title_from(messages) or ""
+        return {"id": self._conversation_id, "title": title, "messages": len(messages)}
+
+    def list_conversations(self) -> dict[str, Any]:
+        return {
+            "conversations": self.conversations.list(),
+            "current": self.current_conversation(),
+        }
+
+    def _save_conversation(self) -> None:
+        """Write the open chat, and report a title that appeared with it.
+
+        Called at the end of every turn and after a reset. The title is derived
+        from the first question, so the window learns it exactly once per chat -
+        which is the event a tab strip needs to name a new tab.
+        """
+
+        if self._loop is None:
+            return
+        before = self.conversations.read(self._conversation_id) or {}
+        record = self.conversations.save(self._conversation_id, self._loop.messages)
+        if record.get("title") != before.get("title"):
+            self.bus.emit(
+                "conversation_changed",
+                {
+                    "id": record["id"],
+                    "title": record["title"],
+                    "reason": "saved",
+                },
+            )
+
+    def new_conversation(self) -> dict[str, Any]:
+        """Start an empty chat, keeping the one that was open."""
+
+        self._save_conversation()
+        record = self.conversations.create()
+        self._conversation_id = record["id"]
+        self.invalidate_loop()
+        self.bus.emit(
+            "conversation_changed",
+            {"id": record["id"], "title": record["title"], "reason": "created"},
+        )
+        return {"id": record["id"], "title": record["title"], "messages": 0}
+
+    def open_conversation(self, conversation_id: str) -> dict[str, Any]:
+        """Make one saved chat the open one."""
+
+        record = self.conversations.read(conversation_id)
+        if record is None:
+            raise ConfigError(f"no conversation {conversation_id!r} in this folder")
+        if conversation_id != self._conversation_id:
+            self._save_conversation()
+        self._conversation_id = record["id"]
+        self.invalidate_loop()
+        self.bus.emit(
+            "conversation_changed",
+            {"id": record["id"], "title": record.get("title") or "", "reason": "opened"},
+        )
+        return self.current_conversation()
+
+    def rename_conversation(self, conversation_id: str, title: str) -> dict[str, Any]:
+        record = self.conversations.rename(conversation_id, title)
+        if record is None:
+            raise ConfigError(f"no conversation {conversation_id!r} in this folder")
+        if conversation_id == self._conversation_id:
+            self.bus.emit(
+                "conversation_changed",
+                {"id": record["id"], "title": record["title"], "reason": "renamed"},
+            )
+        return {"id": record["id"], "title": record["title"]}
+
+    def delete_conversation(self, conversation_id: str) -> dict[str, Any]:
+        """Forget one chat. Deleting the open one opens a new one."""
+
+        removed = self.conversations.delete(conversation_id)
+        if not removed:
+            raise ConfigError(f"no conversation {conversation_id!r} in this folder")
+        self.bus.emit("conversation_changed", {"id": conversation_id, "deleted": True, "reason": "deleted"})
+        fresh = None
+        if conversation_id == self._conversation_id:
+            fresh = self.new_conversation()
+        return {"deleted": conversation_id, "current": fresh or self.current_conversation()}
 
     def invalidate_loop(self) -> None:
         """Drop the cached loop so the next turn picks up new settings."""
@@ -233,11 +373,26 @@ class CoreSession:
             loop = self.loop()
             result = loop.run(text, tools=tools, mode=mode)
             self._turn.result = result
-            save_history(self._workspace, loop.messages)
         except Exception as exc:  # reported to the client verbatim
             self._turn.error = f"{type(exc).__name__}: {exc}"
             self.bus.emit("error", {"message": self._turn.error})
         finally:
+            # Written here rather than at the end of the process: a window that is
+            # closed, a core that is killed or a folder that is switched all end
+            # this way, and a chat that only exists in memory until shutdown is a
+            # chat the user cannot rely on. A turn that failed is saved too - what
+            # the user typed happened.
+            try:
+                self._save_conversation()
+                # The single per-folder file is kept in step as well: it is what
+                # an older build of this application reads, and a downgrade should
+                # not look like lost history.
+                if self._loop is not None:
+                    save_history(self._workspace, self._loop.messages)
+            except OSError as exc:
+                self.bus.emit(
+                    "error", {"message": f"the conversation could not be saved: {exc}"}
+                )
             self._turn.running = False
 
     def wait(self, timeout: float | None = None) -> bool:
@@ -258,8 +413,9 @@ class CoreSession:
         return {"cancelled": self._loop is not None, "pending_approvals": len(pending)}
 
     def reset(self) -> None:
-        if self._loop is not None:
-            self._loop.reset()
+        """Start a new chat. The one that was open stays in the list."""
+
+        self.new_conversation()
         save_history(self._workspace, [])
 
     def resolve_approval(
@@ -383,7 +539,10 @@ class CoreSession:
                 "last_stopped": turn.result.stopped if turn.result else "",
             },
             "pending_approvals": self.approvals.pending,
-            "history_length": len(self._loop.messages) if self._loop else 0,
+            "history_length": len(self.history_messages()),
+            # Which chat is open, so a window that reconnects draws the right tab
+            # and names it.
+            "conversation": self.current_conversation(),
             # What the window looks like right now, so a window opened in the
             # middle of a long conversation shows the gauge before the next turn
             # rather than after it. Null until a loop exists.
@@ -396,6 +555,11 @@ class CoreSession:
         if self._thread is not None and self._thread.is_alive():
             self.cancel()
             self._thread.join(timeout=5)
+        try:
+            self._save_conversation()
+        except OSError:
+            # Shutting down is not the moment to raise about a file.
+            pass
         self.invalidate_loop()
 
 

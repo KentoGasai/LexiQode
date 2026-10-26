@@ -289,8 +289,14 @@ class _RequestHandler(BaseHTTPRequestHandler):
             elif path == "/api/tools":
                 self._send(HTTPStatus.OK, {"ok": True, "tools": session.registry.describe()})
             elif path == "/api/history":
-                messages = session.loop().messages if session._loop else []
-                self._send(HTTPStatus.OK, {"ok": True, "messages": messages})
+                # Built on demand: after a chat is opened the loop does not exist
+                # until the next turn, and a window that switched chats would draw
+                # an empty transcript for a conversation that is not empty.
+                self._send(
+                    HTTPStatus.OK, {"ok": True, "messages": session.history_messages()}
+                )
+            elif path == "/api/conversations":
+                self._send(HTTPStatus.OK, {"ok": True, **session.list_conversations()})
             elif path == "/api/ping":
                 self._send(HTTPStatus.OK, {"ok": True, "pong": True})
             else:
@@ -335,7 +341,32 @@ class _RequestHandler(BaseHTTPRequestHandler):
                 self._send(HTTPStatus.OK, {"ok": True, **session.cancel()})
             elif path == "/api/reset":
                 session.reset()
-                self._send(HTTPStatus.OK, {"ok": True})
+                self._send(HTTPStatus.OK, {"ok": True, **session.list_conversations()})
+            elif path == "/api/conversations/new":
+                self._send(HTTPStatus.OK, {"ok": True, "conversation": session.new_conversation()})
+            elif path == "/api/conversations/open":
+                opened = session.open_conversation(str(body.get("id") or ""))
+                self._send(
+                    HTTPStatus.OK,
+                    {
+                        "ok": True,
+                        "conversation": opened,
+                        "messages": session.conversation_messages(),
+                    },
+                )
+            elif path == "/api/conversations/rename":
+                renamed = session.rename_conversation(
+                    str(body.get("id") or ""), str(body.get("title") or "")
+                )
+                self._send(HTTPStatus.OK, {"ok": True, "conversation": renamed})
+            elif path == "/api/conversations/delete":
+                self._send(
+                    HTTPStatus.OK,
+                    {
+                        "ok": True,
+                        **session.delete_conversation(str(body.get("id") or "")),
+                    },
+                )
             elif path == "/api/approval":
                 delivered = session.resolve_approval(
                     str(body.get("id") or ""),

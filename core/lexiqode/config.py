@@ -86,6 +86,12 @@ def sessions_dir() -> Path:
     return data_dir() / "sessions"
 
 
+def conversations_dir() -> Path:
+    """Saved chats, one file per conversation, one folder per workspace."""
+
+    return data_dir() / "conversations"
+
+
 def runtime_descriptor_path() -> Path:
     """Where a running core publishes how to reach it.
 
