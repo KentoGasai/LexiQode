@@ -64,6 +64,12 @@ class RunCommandTool(Tool):
                 shell=True,
                 cwd=str(cwd),
                 capture_output=True,
+                # Nothing is behind this stdin: the editor starts the core with a
+                # pipe nobody writes to. A command that waits for input - an
+                # interactive prompt, an editor, a confirmation - would otherwise
+                # sit there until the timeout and report a timeout instead of
+                # saying that it wanted to ask something.
+                stdin=subprocess.DEVNULL,
                 timeout=timeout,
                 check=False,
             )

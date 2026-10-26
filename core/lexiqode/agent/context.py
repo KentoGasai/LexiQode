@@ -23,6 +23,15 @@ def _git(workspace: Path, *arguments: str) -> str:
             ["git", *arguments],
             cwd=str(workspace),
             capture_output=True,
+            # `stdin` has to be closed, not inherited. The editor starts the core
+            # with a pipe on stdin and never writes to it, and a git process that
+            # inherits an open pipe waits on it: `git status` here blocked for as
+            # long as the editor stayed open, which hung the whole turn before the
+            # model was ever called - the assistant answered nothing, ever, in a
+            # workspace that is a repository. Started from a console the same code
+            # is fine, because a console's stdin is a terminal, which is why this
+            # survived every command-line test.
+            stdin=subprocess.DEVNULL,
             timeout=_GIT_TIMEOUT,
             check=False,
         )
