@@ -104,6 +104,9 @@ const api = {
     get: () => call(CHANNELS.settings.get),
     update: (patch) => call(CHANNELS.settings.update, patch)
   },
+  app: {
+    i18n: () => call(CHANNELS.app.i18n)
+  },
   agent: {
     status: () => call(CHANNELS.agent.status),
     start: () => call(CHANNELS.agent.start),

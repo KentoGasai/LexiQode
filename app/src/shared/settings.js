@@ -76,6 +76,7 @@ function clampNumber(value, min, max, fallback) {
 const THEMES = new Set(['system', 'dark', 'light']);
 const WRAP_MODES = new Set(['off', 'on', 'bounded']);
 const AUTO_SAVE_MODES = new Set(['off', 'afterDelay', 'onFocusChange']);
+const LANGUAGES = new Set(['system', 'ru', 'en']);
 
 /** Bring a merged object into a state the rest of the app can rely on. */
 function sanitise(settings) {
@@ -83,6 +84,7 @@ function sanitise(settings) {
   result.version = 1;
 
   if (!THEMES.has(result.appearance.theme)) result.appearance.theme = DEFAULTS.appearance.theme;
+  if (!LANGUAGES.has(result.appearance.language)) result.appearance.language = DEFAULTS.appearance.language;
   result.appearance.fontSize = clampNumber(result.appearance.fontSize, 8, 40, DEFAULTS.appearance.fontSize);
   result.appearance.tabSize = clampNumber(result.appearance.tabSize, 1, 16, DEFAULTS.appearance.tabSize);
   if (!WRAP_MODES.has(result.appearance.wordWrap)) result.appearance.wordWrap = DEFAULTS.appearance.wordWrap;
@@ -104,6 +106,7 @@ function sanitise(settings) {
 
   result.files.maxSearchResults = clampNumber(result.files.maxSearchResults, 10, 20000, DEFAULTS.files.maxSearchResults);
   result.files.maxFileSizeKb = clampNumber(result.files.maxFileSizeKb, 16, 65536, DEFAULTS.files.maxFileSizeKb);
+  result.files.reopenLastFolder = Boolean(result.files.reopenLastFolder);
   if (!Array.isArray(result.files.exclude) || result.files.exclude.some((entry) => typeof entry !== 'string')) {
     result.files.exclude = clone(DEFAULTS.files.exclude);
   }
@@ -149,4 +152,4 @@ function rememberFolder(settings, folder) {
   return result;
 }
 
-module.exports = { loadSettings, merge, sanitise, applyPatch, rememberFolder };
+module.exports = { LANGUAGES, loadSettings, merge, sanitise, applyPatch, rememberFolder };

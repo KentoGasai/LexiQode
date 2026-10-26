@@ -1,194 +1,219 @@
 # LexiQode
 
-An IDE with an assistant that runs on **your** endpoint.
+IDE с ассистентом, который работает на **твоём** адресе модели.
 
-No subscription, no account, no vendor relay. You point it at anything that
-speaks the OpenAI `chat/completions` API - a hosted gateway, a local runtime, or
-your own proxy - and the agent works in the folder you opened: reading files,
-editing them, running commands, with a mode that decides how much it may do.
+Ни подписки, ни аккаунта, ни чужого посредника. Достаточно указать любой сервер,
+говорящий на OpenAI `chat/completions` — облачный шлюз, локальный рантайм или свой
+прокси, — и агент начнёт работать в открытой папке: читать файлы, править их,
+запускать команды, а режим решает, что ему разрешено.
 
-## What it is, and what it stopped being
+[English version](README.en.md)
 
-This started as a patched build of the VS Code sources. That path is retired:
-two days went into fighting a 40-minute native build and a window that insisted
-on showing somebody else's chat, and none of it produced anything the user could
-see. The product is now its own application.
+## Что это
 
-| | |
+| Слой | Решение |
 |---|---|
-| The window | our own, drawn by our own HTML and CSS, delivered over a custom `app://` scheme |
-| The editor | Monaco, the editing component from VS Code, used as a library |
-| The terminal | xterm.js driving a shell through pipes |
-| The assistant | our own Python core, started and supervised by the window |
-| The model | any OpenAI-compatible endpoint, configured by you |
+| Окно | своё: разметка, стили и модули, отдаваемые по схеме `app://` |
+| Редактор | Monaco — компонент редактирования из VS Code, как библиотека |
+| Терминал | xterm.js и оболочка, подключённая через каналы ввода-вывода |
+| Ассистент | собственное ядро на Python, которое окно запускает и контролирует |
+| Модель | любой OpenAI-совместимый адрес, настраивается тобой |
+| Языки окна | русский и английский, переключаются в настройках |
 
-Monaco and xterm are the two pieces of "their functionality" that are worth
-having, and both are ordinary dependencies under MIT. Nothing else about the
-editor comes from a fork.
+Раньше это была сборка исходников VS Code. Этот путь закрыт: два дня ушли на
+40-минутную нативную сборку и окно, которое упорно показывало чужой чат, и ничего
+из этого пользователь не увидел. Сейчас это самостоятельное приложение.
 
-## Requirements
+## Требования
 
-* Windows 10 or 11, 64-bit.
-* **Python 3.11 or newer on `PATH`** for the assistant. The editor half runs
-  without it, and says so instead of failing silently.
-* No administrator rights. The app is a folder you unpack and run.
-* Node.js 24 only if you want to build it yourself.
+* Windows 10 или 11, 64-бит.
+* **Python 3.11 или новее в `PATH`** — для ассистента. Без него работает
+  редактор, и приложение об этом скажет.
+* Права администратора не нужны: это папка, которую распаковывают и запускают.
+* Node.js 24 — только если собираешь сам.
 
-## Install
+## Запуск
 
-1. Download `LexiQode-<version>-win32-x64.zip` from your Gitea package registry
-   (see [docs/gitea-packages.md](docs/gitea-packages.md)) or from the build
-   artifacts of this repository.
-2. Unpack it anywhere and run `LexiQode.exe`.
-3. The digest next to the download is the file's SHA-256; the same digest is
-   printed by the build and by the upload.
+**Готовая сборка.** Распакуй `dist\LexiQode-<версия>-win32-x64.zip` и запусти
+`LexiQode.exe`. Рядом со zip лежит файл `.sha256` с контрольной суммой — той же,
+что печатает сборка.
 
-To build it yourself:
+**Установить в профиль и получить ярлыки** (без прав администратора):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/build-app.ps1
-powershell -ExecutionPolicy Bypass -File scripts/run-app.ps1 -Deploy
+powershell -ExecutionPolicy Bypass -File scripts\run-app.ps1 -Deploy
+powershell -ExecutionPolicy Bypass -File scripts\create-shortcuts.ps1
 ```
 
-`build-app.ps1` runs both test suites, stages the bundle, and writes the zip and
-its digest into `dist/`. `run-app.ps1 -Deploy` copies it into
-`%LOCALAPPDATA%\Programs\LexiQode`, which needs no privileges.
+**Из исходников** (после правок кода):
 
-## Point it at a model
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run-app.ps1 -Source
+```
 
-Open the assistant, press the gear in its header, and fill in the endpoint:
+**Пересобрать пакет** после изменений:
 
-* **endpoint** - the base URL, for example `https://api.example.com/v1` or
-  `http://127.0.0.1:11434/v1`.
-* **api key** - stored on your machine; it is never sent anywhere except that
-  endpoint.
-* **model** - the model id. *Save & test* saves first and then asks the endpoint
-  which models it offers, because that is the only order in which the question
-  can be answered truthfully.
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build-app.ps1
+```
 
-The same settings can be set without the window:
+Скрипт прогоняет оба набора тестов, собирает папку и zip с контрольной суммой в
+`dist\`. Флаг `-SkipTests` пропускает тесты.
+
+## Папка открывается только тогда, когда её просят
+
+Приложение **не открывает ничего само**. Запуск без аргументов показывает экран
+приветствия с кнопкой «Открыть папку» и списком недавних. Открыть папку можно
+также так:
+
+* клик по надписи слева в строке состояния;
+* `Ctrl+K Ctrl+O`;
+* `Ctrl+Shift+P` → «Открыть папку…»;
+* передать путь при запуске: `LexiQode.exe F:\мой\проект` (нужен абсолютный путь).
+
+Если хочется, чтобы последняя папка открывалась сама, есть настройка
+`files.reopenLastFolder` в `app-settings.json`. По умолчанию она выключена.
+
+## Как указать модель
+
+Открой панель «Ассистент» (`Ctrl+Shift+A`), нажми шестерёнку и заполни:
+
+* **адрес** — базовый URL, например `https://api.example.com/v1` или
+  `http://127.0.0.1:11434/v1`;
+* **ключ API** — хранится на твоей машине и уходит только этому адресу;
+* **модель** — идентификатор.
+
+Список моделей **подтягивается сам**: как только адрес и ключ введены, окно
+спрашивает у сервера, что он предлагает, и даёт выбрать из списка. Сохранять
+заранее не нужно — запрос идёт по введённым значениям.
+
+То же самое можно задать без окна:
 
 ```powershell
 $env:LEXIQODE_BASE_URL = 'https://api.example.com/v1'
 $env:LEXIQODE_API_KEY  = 'sk-...'
-$env:LEXIQODE_MODEL    = 'your-model'
-python -m lexiqode doctor     # verifies the endpoint and the key
+$env:LEXIQODE_MODEL    = 'имя-модели'
+python -m lexiqode doctor     # проверяет адрес и ключ
 ```
 
-Settings live in `%APPDATA%\LexiQode`: `settings.json` for the agent (endpoint,
-key, model, limits) and `app-settings.json` for the window (layout, theme, open
-tabs). Transcripts and other per-machine data live in `%LOCALAPPDATA%\LexiQode`.
+Настройки лежат в `%APPDATA%\LexiQode`: `settings.json` — для агента (адрес, ключ,
+модель, лимиты), `app-settings.json` — для окна (раскладка, тема, язык, открытые
+вкладки). История разговоров и прочие данные — в `%LOCALAPPDATA%\LexiQode`.
 
-## The five modes
+## Режимы
 
-Modes are enforced by the core, not drawn on a button: an excluded tool is
-removed from the schemas **and** refused by the registry, so a mode cannot be
-talked around by a persuasive model.
+Режим вынесен в композер внизу и выбирается **выпадающим списком с иконками** —
+это решение о том, что разрешено следующему сообщению. Режимы проверяются в ядре,
+а не только рисуются: исключённый инструмент убирается из схем **и** отклоняется
+реестром, поэтому режим нельзя обойти уговорами модели.
 
-| Mode | May read | May write | May run |
+| Режим | Читает | Правит | Запускает |
 |---|---|---|---|
-| Agent | yes | yes | yes |
-| Ask | yes | no | no |
-| Plan | yes | no | no |
-| Debug | yes | yes | yes |
-| Review | yes | no | no |
+| Агент | да | да | да |
+| Вопрос | да | нет | нет |
+| План | да | нет | нет |
+| Отладка | да | да | да |
+| Ревью | да | нет | нет |
 
-Modes sit in the composer, at the bottom of the panel, because that is where the
-decision is made: what the next message is allowed to do. The header carries
-status only.
+## Смена языка
 
-## What works
+Язык окна переключается в настройках агента (строка «язык окна») или командой
+`Язык окна: изменить` в палитре команд: «как в системе» → русский → английский →
+снова «как в системе». По умолчанию язык берётся у системы.
 
-Verified by driving the built application through the DevTools protocol, not by
-reading the code (`app/scripts/probe-window.cjs`):
+Словари — обычные файлы данных `app/src/shared/i18n.ru.json` и
+`app/src/shared/i18n.en.json`. Чтобы добавить язык, достаточно положить такой же
+файл и дописать код в список в `app/src/shared/i18n.js`: тест сравнивает файлы
+ключ за ключом и не даст им разойтись.
+
+## Что работает
+
+Проверено запуском собранного приложения через отладочный протокол, а не чтением
+кода (`app/scripts/probe-window.cjs`):
 
 | | |
 |---|---|
-| Explorer | file tree, create, rename, delete to the recycle bin, reveal |
-| Editor | Monaco: syntax, multiple tabs, dirty state, CRLF preserved on save, find in file |
-| Quick open | `Ctrl+P`, ranked by a fuzzy score with a boundary bonus |
-| Find in files | `Ctrl+Shift+F`, streaming results in batches, cancellable |
-| Search and replace | in the active file, through Monaco |
-| Source control | status split into staged and unstaged, diffs, stage, unstage, discard, commit, branch switch |
-| Terminal | `Ctrl+J`, real PowerShell session, `cd` persists, colour, UTF-8 or the shell's own code page |
-| Assistant | streaming answers, reasoning shown separately, tool rows with arguments and results, approvals, cancel, new conversation |
-| Layout | resizable and restorable: sidebar, panel, assistant, open tabs |
-| Appearance | dark and light, following the system by default |
+| Проводник | дерево файлов, создание, переименование, удаление в корзину, показать в проводнике |
+| Редактор | Monaco: подсветка, вкладки, признак несохранённых правок, сохранение с сохранением переводов строк, поиск в файле |
+| Быстрое открытие | `Ctrl+P`, ранжирование нечётким сравнением с бонусом за границу сегмента |
+| Поиск по файлам | `Ctrl+Shift+F`, результаты идут порциями, поиск можно отменить |
+| Контроль версий | состояние разделено на подготовленное и изменённое, диффы, подготовить, снять, отменить, коммит, переключение ветки |
+| Терминал | `Ctrl+J`, настоящая сессия PowerShell, `cd` сохраняется, цвета, UTF-8 или кодировка оболочки |
+| Ассистент | потоковый ответ, отдельно показанные рассуждения, строки вызовов с аргументами и результатом, подтверждения, остановка, новый разговор |
+| Раскладка | изменяемая и восстанавливаемая: боковая панель, нижняя панель, ассистент, открытые вкладки |
+| Оформление | тёмная и светлая темы, по умолчанию как в системе |
+| Языки | русский и английский, переключаются на лету |
 
-## What it deliberately does not do
+## Чего приложение намеренно не делает
 
-Stated plainly, because a hidden limitation is worse than a missing feature:
+Прямо, потому что скрытое ограничение хуже отсутствующей функции:
 
-* **The terminal is a command console.** A shell driven through pipes has no
-  pseudo-console, so full-screen programs (`vim`, `top`) cannot run in it.
-  Everything that reads a command and prints lines does. A pseudo-console on
-  Windows needs a native module compiled at build time, and an IDE that only
-  builds where Visual Studio is installed is a worse trade.
-* **No extension API.** The editor has no third-party extension host. Language
-  support, themes and commands come from the app itself.
-* **Language intelligence is Monaco's.** TypeScript, JavaScript, JSON, CSS and
-  HTML get real language services; other languages get syntax, brackets and
-  folding, without a language server.
-* **One folder per window.** Opening another folder replaces the workspace; a
-  second window is a second process.
-* **No telemetry, and no network requests at all except to your endpoint.** The
-  window is served with `connect-src 'none'`: it cannot reach the network even
-  if something in it tried.
+* **Терминал — консоль команд.** У оболочки, подключённой через каналы, нет
+  псевдоконсоли, поэтому полноэкранные программы (`vim`, `top`) в ней не
+  работают. Всё, что читает команду и печатает строки, работает. Псевдоконсоль в
+  Windows требует нативной сборки, а IDE, которая собирается только там, где
+  стоит Visual Studio, — плохой размен.
+* **Нет API расширений.** Сторонних расширений нет; языки, темы и команды даёт
+  само приложение.
+* **Языковая поддержка — от Monaco.** TypeScript, JavaScript, JSON, CSS и HTML
+  получают настоящие языковые службы; остальным языкам — подсветка, скобки и
+  сворачивание.
+* **Одна папка на окно.** Открытие другой папки заменяет рабочую; второе окно —
+  второй процесс.
+* **Никакой телеметрии и никаких обращений в сеть, кроме твоего адреса.** Окно
+  отдаётся с политикой `connect-src 'none'`: оно не может выйти в сеть, даже если
+  бы попыталось.
+* **Немного текста ещё английский.** Сообщения, которые приходят из ядра
+  (например, ошибки модели), печатаются так, как их сформулировало ядро.
 
-## Layout
+## Структура
 
 ```
-app/                  the window: Electron main process, preload, our interface
-  src/main/           window, IPC, workspace, search, git, terminal, agent bridge
-  src/preload/        the entire surface the page is allowed to call
-  src/renderer/       the interface: markup, styles, modules
-  src/shared/         logic both sides use, with its own tests
-  test/               100 tests, `npm test`
-  scripts/            vendoring the browser bundles, probes
-core/                 the agent: Python, OpenAI-compatible, its own test suite
-extension/            optional: the same agent inside VS Code, Cursor or VSCodium
-scripts/              build, run, publish, and one-off research tools
-docs/                 protocol, packages, and the notes behind decisions
+app/                  окно: main-процесс Electron, preload, интерфейс
+  src/main/           окно, IPC, рабочая папка, поиск, git, терминал, мост к агенту
+  src/preload/        весь набор вызовов, доступных странице
+  src/renderer/       интерфейс: разметка, стили, модули
+  src/shared/         логика для обеих сторон и словари языков
+  test/               108 тестов, `npm test`
+  scripts/            вендоринг браузерных пакетов и замеры
+core/                 агент: Python, OpenAI-совместимый, со своими тестами
+scripts/              сборка, запуск, публикация
+docs/                 протокол ядра и публикация пакетов
 ```
 
-## Tests
+## Тесты
 
 ```powershell
-cd core;  python -m pytest tests -q      # the agent, its tools and its protocol
-cd app;   npm test                       # 100 tests: shared logic, window contracts
-node app/scripts/probe-window.cjs        # starts the app and interrogates the window
+cd core;  python -m pytest tests -q      # агент, его инструменты и протокол
+cd app;   npm test                       # 108 тестов: общая логика и контракты окна
+node app\scripts\probe-window.cjs        # запускает приложение и опрашивает окно
+node app\scripts\probe-chat.cjs          # поднимает заглушку и гоняет через неё ядро
 ```
 
-The app's tests are not only unit tests. They include a live shell test (a real
-PowerShell is started and driven) and a set of static contracts over the window's
-sources: every element the scripts look up must exist in the markup, every
-channel the window subscribes to must exist in the shared constants, every import
-must resolve, and the only code allowed to produce markup is the icon set and the
-markdown renderer, which escapes its input first.
+Тесты окна — не только модульные. Среди них есть живой тест терминала (запускается
+настоящий PowerShell) и статические контракты по исходникам: каждый элемент,
+который ищет код, должен быть в разметке; каждый канал, на который подписывается
+окно, должен быть в общих константах; каждый импорт должен разрешаться; а разметку
+могут производить только набор иконок и рендерер markdown, который сначала
+экранирует вход. Языки проверяются так же: одинаковый набор ключей в словарях и
+наличие в них всех ключей, которые запрашивает код.
 
-The window probe is a smoke test against the real application - the same thing
-that found the terminal rendering nothing when the panel was restored open, and
-the fuzzy scorer ranking `a-p-p-deep.js` above `app.js`. It accepts
-`LEXIQODE_PROBE_EXE` to check a packaged bundle instead of the sources.
+Зонд окна — дымовой тест по настоящему приложению. Именно он нашёл терминал,
+который ничего не рисовал при восстановленной открытой панели, и оценщик
+нечёткого поиска, ставивший `a-p-p-deep.js` выше `app.js`. Переменная
+`LEXIQODE_PROBE_EXE` позволяет проверить собранный пакет вместо исходников.
 
-## Publishing
+## Публикация
 
-`scripts/publish-gitea.ps1` uploads a built zip to Gitea's generic package
-registry, which is the one that suits a desktop application: it keeps the file
-exactly as built, next to the git tag that describes it.
+`scripts/publish-gitea.ps1` загружает собранный zip в реестр generic-пакетов
+Gitea — он подходит для настольного приложения: файл хранится ровно таким, каким
+собран, рядом с тегом, который его описывает.
 
 ```powershell
-$env:GITEA_TOKEN = '...'      # Settings > Applications, scope write:package
-powershell -ExecutionPolicy Bypass -File scripts/publish-gitea.ps1 `
-    -Server https://git.example.com -Owner your-name
+$env:GITEA_TOKEN = '...'      # Настройки → Приложения, область write:package
+powershell -ExecutionPolicy Bypass -File scripts\publish-gitea.ps1 `
+    -Server https://git.example.com -Owner твоё-имя
 ```
 
-See [docs/gitea-packages.md](docs/gitea-packages.md) for the details, including
-how the CI workflow publishes on a tag when the secrets are present.
-
-## Using the agent in another editor
-
-`extension/` contains a VS Code extension that talks to the same core over the
-same protocol. It is optional and independent: `scripts/install-extension.ps1`
-builds and installs it into VS Code, Cursor or VSCodium. The app does not need
-it, and its absence does not affect the app.
+Подробности, включая публикацию из CI по секретам, — в
+[docs/gitea-packages.md](docs/gitea-packages.md).

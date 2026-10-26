@@ -15,6 +15,7 @@
  */
 
 const { CHANNELS } = require('../shared/constants');
+const { payloadFor } = require('../shared/i18n');
 
 function wrap(handler) {
   return async (event, ...args) => {
@@ -27,7 +28,7 @@ function wrap(handler) {
   };
 }
 
-function registerIpc({ ipcMain, dialog, shell, settings, workspace, search, git, terminal, agent, windowOf }) {
+function registerIpc({ ipcMain, dialog, shell, app, settings, workspace, search, git, terminal, agent, windowOf }) {
   const handle = (channel, handler) => ipcMain.handle(channel, wrap(handler));
 
   // ---------------------------------------------------------------- window
@@ -86,11 +87,17 @@ function registerIpc({ ipcMain, dialog, shell, settings, workspace, search, git,
     if (!folder) return null;
     const result = await workspace.open(folder);
     settings.rememberFolder(result.root);
-    await agent.ensureStarted().catch(() => {});
+    // The agent belongs to the folder it was started in, so a new folder means a
+    // new core. Failures are reported through the agent status the panel already
+    // shows, rather than failing the folder switch itself.
+    await agent.restart().catch(() => {});
     return result;
   });
   handle(CHANNELS.workspace.close, () => {
     workspace.close();
+    // A core left running would keep working in a folder the window no longer
+    // shows.
+    void agent.stop().catch(() => {});
     return null;
   });
   handle(CHANNELS.workspace.tree, (event, relative) => workspace.list(relative || '.'));
@@ -161,6 +168,14 @@ function registerIpc({ ipcMain, dialog, shell, settings, workspace, search, git,
   handle(CHANNELS.agent.complete, (event, payload) => agent.complete(payload));
 
   // ----------------------------------------------------------------- shell
+  /**
+   * The window's language and its dictionary.
+   *
+   * One call, answered from the main process, so the list of languages lives in
+   * one place and the window never has to know where a translation is stored.
+   */
+  handle(CHANNELS.app.i18n, () => payloadFor(settings.get().appearance.language, app.getLocale()));
+
   handle(CHANNELS.shell.openExternal, (event, url) => {
     const target = String(url || '');
     if (!/^https?:\/\//i.test(target)) throw new Error('only http and https links can be opened');

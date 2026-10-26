@@ -313,14 +313,33 @@ class CoreSession:
         content = message.get("content") if isinstance(message, dict) else None
         return content if isinstance(content, str) else ""
 
-    def list_models(self, profile_id: str | None = None) -> list[str]:
-        """Ask the configured endpoint which models it serves.
+    def list_models(
+        self,
+        profile_id: str | None = None,
+        *,
+        base_url: str | None = None,
+        api_key: str | None = None,
+    ) -> list[str]:
+        """Ask an endpoint which models it serves.
 
         Routed through the session like every other model call, so a single
         place decides which client talks to an endpoint.
+
+        The connection fields can be overridden, because the endpoint worth
+        asking about is usually the one somebody is still typing into a settings
+        form. Requiring a save first would mean the answer describes the previous
+        endpoint, and requiring a model id first would make the list impossible
+        to reach exactly when it is needed - choosing that id.
         """
 
-        profile = self.settings.effective_profile(profile_id) if profile_id else self.profile()
+        profile = self.settings.describe_profile(profile_id)
+        overrides: dict[str, Any] = {}
+        if (base_url or "").strip():
+            overrides["base_url"] = base_url.strip()
+        if (api_key or "").strip():
+            overrides["api_key"] = api_key.strip()
+        if overrides:
+            profile = replace(profile, **overrides).normalised()
         client = (
             self._client_factory(profile) if self._client_factory else OpenAIChatClient(profile, timeout=15.0)
         )

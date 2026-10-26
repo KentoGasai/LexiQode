@@ -107,7 +107,7 @@ async function waitForDom(session) {
          ids: document.querySelectorAll('[id]').length,
          activity: document.querySelectorAll('.activity__item').length,
          status: document.querySelectorAll('.statusbar__item').length,
-         modes: document.querySelectorAll('.mode').length
+         modes: document.querySelectorAll('.modebtn').length
        };`
     );
     if (ready.state !== 'loading' && ready.activity > 0 && ready.status > 0 && ready.modes > 0) return ready;
@@ -134,6 +134,11 @@ const CHECKS = [
         asideCount: document.querySelectorAll('aside').length,
         idsRendered: document.querySelectorAll('[id]').length,
         bootFailed: document.body.textContent.includes('could not start'),
+        // Started with no folder: the welcome screen should be what is showing,
+        // and nothing should have been opened on the user's behalf.
+        welcomeVisible: !document.getElementById('welcome').hidden,
+        welcomeTitle: document.getElementById('welcome').textContent.slice(0, 60),
+        folderOpenedByItself: Boolean(await window.lexiqode.workspace.current()),
         bodyClasses: document.body.className || '(none)'
       };
     `
@@ -252,6 +257,58 @@ const CHECKS = [
         python: status.python && status.python.version ? status.python.version : String(status.python),
         profileReady: state.profile_ready,
         modes: Array.isArray(state.modes) ? state.modes.map((mode) => mode.id) : state.error
+      };
+    `
+  },
+  {
+    label: 'the mode is a dropdown that lists the modes with icons',
+    expression: `
+      const button = document.querySelector('.modebtn');
+      if (!button) return { present: false, reason: 'no mode button was rendered' };
+      const label = button.querySelector('.modebtn__label');
+      const iconCount = button.querySelectorAll('svg').length;
+      button.click();
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const list = document.querySelector('.modelist');
+      const items = list ? [...list.querySelectorAll('.modelist__item')] : [];
+      const state = {
+        present: true,
+        closedLabel: label ? label.textContent : '',
+        iconsInButton: iconCount,
+        expanded: button.getAttribute('aria-expanded'),
+        itemCount: items.length,
+        items: items.map((item) => ({
+          label: item.querySelector('.modelist__label').textContent,
+          hint: item.querySelector('.modelist__hint').textContent.slice(0, 40),
+          icons: item.querySelectorAll('svg').length,
+          selected: item.getAttribute('aria-selected')
+        }))
+      };
+      // Choosing the second mode must be reflected in the button, and the list
+      // must close behind it.
+      if (items[1]) items[1].click();
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      state.afterChoosing = {
+        label: document.querySelector('.modebtn__label').textContent,
+        listClosed: !document.querySelector('.modelist'),
+        expanded: document.querySelector('.modebtn').getAttribute('aria-expanded')
+      };
+      return state;
+    `
+  },
+  {
+    label: 'the settings form',
+    expression: `
+      document.querySelector('#chat-actions .iconbtn:nth-child(2)').click();
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      const sheet = document.querySelector('#transcript .commit');
+      if (!sheet) return { open: false };
+      return {
+        open: true,
+        fields: [...sheet.querySelectorAll('.field__row')].length,
+        labels: [...sheet.querySelectorAll('.field__row > span')].slice(0, 8).map((node) => node.textContent),
+        hasLanguageSelect: [...sheet.querySelectorAll('select')].length > 0,
+        scanText: sheet.querySelector('.list__empty') ? sheet.querySelector('.list__empty').textContent.slice(0, 70) : ''
       };
     `
   }

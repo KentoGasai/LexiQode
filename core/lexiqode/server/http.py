@@ -368,7 +368,11 @@ class _RequestHandler(BaseHTTPRequestHandler):
         """Ask the configured endpoint which models it serves."""
 
         session = self.server_app.session
-        return session.list_models(str(body.get("profile") or "") or None)
+        return session.list_models(
+            str(body.get("profile") or "") or None,
+            base_url=str(body.get("base_url") or "") or None,
+            api_key=str(body.get("api_key") or "") or None,
+        )
 
     def _complete(self, body: dict[str, Any]) -> str:
         """One-shot completion used by editor features such as an inline edit."""

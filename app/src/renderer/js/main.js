@@ -17,6 +17,7 @@ import { createGitPanel } from './git-panel.js';
 import { createTerminalPanel } from './terminal-panel.js';
 import { createChat } from './chat.js';
 import { rank } from './fuzzy.js';
+import { current as i18nInfo, initI18n, t } from './i18n.js';
 
 const api = window.lexiqode;
 const bus = createBus();
@@ -142,13 +143,17 @@ function selectActivity(id) {
 }
 
 async function mountActivity() {
-  if (!workspace) {
-    document.getElementById('sidebar-title').textContent = 'Explorer';
+  if (workspace && currentActivity === 'search') {
+    search.mount();
     return;
   }
-  if (currentActivity === 'search') search.mount();
-  else if (currentActivity === 'git') git.mount();
-  else await explorer.refresh();
+  if (workspace && currentActivity === 'git') {
+    git.mount();
+    return;
+  }
+  // Without a folder the explorer is what explains that, whichever view was
+  // selected before the folder was closed.
+  await explorer.refresh();
 }
 
 function toggleSidebar() {
@@ -193,20 +198,26 @@ let statusNodes = {};
 
 function renderStatusbar() {
   dom.statusbar.replaceChildren();
-  const name = workspace ? workspace.name : 'no folder open';
+  const name = workspace ? workspace.name : t('status.noFolder');
   const branchText = gitInfo.repo
     ? `${gitInfo.branch || 'detached'}${gitInfo.ahead ? ` ↑${gitInfo.ahead}` : ''}${gitInfo.behind ? ` ↓${gitInfo.behind}` : ''}`
-    : 'no repository';
+    : t('status.noRepo');
 
   statusNodes = {
-    folder: statusItem(name, { title: workspace ? workspace.root : 'Open a folder', onclick: () => void openFolder() }),
+    folder: statusItem(name, { title: workspace ? workspace.root : t('status.openFolder'), onclick: () => void openFolder() }),
     branch: statusItem(branchText, {
-      title: 'Source control',
+      title: t('status.branchTitle'),
       onclick: () => selectActivity('git')
     }),
-    agent: statusItem('agent: —', { title: 'Restart the agent', onclick: () => void restartAgent() }),
-    model: statusItem('no model', { title: 'Agent settings', onclick: () => chat.toggleSettings(true) }),
-    cursor: statusItem('', { title: 'Cursor position' })
+    agent: statusItem(t('status.agent', { state: '—' }), {
+      title: t('status.agentTitle'),
+      onclick: () => void restartAgent()
+    }),
+    model: statusItem(t('status.noModel'), {
+      title: t('cmd.agentSettings'),
+      onclick: () => chat.toggleSettings(true)
+    }),
+    cursor: statusItem('', { title: t('status.cursor', { line: '—', column: '—' }) })
   };
 
   dom.statusbar.append(
@@ -223,9 +234,10 @@ function renderStatusbar() {
 function updateCursor() {
   if (!editor || !statusNodes.cursor) return;
   cursorInfo = editor.positions();
-  statusNodes.cursor.textContent = `${cursorInfo.language || 'plain'} · Ln ${cursorInfo.line}, Col ${cursorInfo.column}${
-    cursorInfo.lines ? ` · ${cursorInfo.lines} lines` : ''
-  }`;
+  const language = cursorInfo.language || t('status.plain');
+  const position = t('status.cursor', { line: cursorInfo.line, column: cursorInfo.column });
+  const lines = cursorInfo.lines ? ` · ${t('status.lines', { count: cursorInfo.lines })}` : '';
+  statusNodes.cursor.textContent = `${language} · ${position}${lines}`;
 }
 
 async function refreshGit({ mount = false } = {}) {
@@ -248,30 +260,31 @@ async function refreshGit({ mount = false } = {}) {
 const palette = { open: false, mode: 'commands', items: [], index: 0, files: [] };
 
 const COMMANDS = [
-  { id: 'workspace.open', label: 'Open folder…', hint: 'Ctrl+K Ctrl+O' },
-  { id: 'workspace.close', label: 'Close folder' },
-  { id: 'file.open', label: 'Open file…', hint: 'Ctrl+O' },
-  { id: 'file.save', label: 'Save file', hint: 'Ctrl+S' },
-  { id: 'file.saveAll', label: 'Save all files' },
-  { id: 'file.close', label: 'Close editor', hint: 'Ctrl+W' },
-  { id: 'editor.find', label: 'Find in file', hint: 'Ctrl+F' },
-  { id: 'search.open', label: 'Find in files', hint: 'Ctrl+Shift+F' },
-  { id: 'quickopen.open', label: 'Go to file…', hint: 'Ctrl+P' },
-  { id: 'view.explorer', label: 'View: Explorer' },
-  { id: 'view.search', label: 'View: Search' },
-  { id: 'view.git', label: 'View: Source control' },
-  { id: 'view.terminal', label: 'View: Terminal' },
-  { id: 'layout.sidebar', label: 'Toggle sidebar', hint: 'Ctrl+B' },
-  { id: 'layout.panel', label: 'Toggle panel', hint: 'Ctrl+J' },
-  { id: 'layout.chat', label: 'Toggle assistant', hint: 'Ctrl+Shift+A' },
-  { id: 'chat.new', label: 'Assistant: new conversation' },
-  { id: 'chat.cancel', label: 'Assistant: cancel turn' },
-  { id: 'chat.focus', label: 'Assistant: focus composer', hint: 'Ctrl+L' },
-  { id: 'chat.settings', label: 'Assistant: endpoint settings' },
-  { id: 'chat.restart', label: 'Assistant: restart the agent' },
-  { id: 'git.refresh', label: 'Source control: refresh' },
-  { id: 'theme.toggle', label: 'Appearance: switch dark and light' },
-  { id: 'about', label: 'About LexiQode' }
+  { id: 'workspace.open', key: 'cmd.openFolder', hint: 'Ctrl+K Ctrl+O' },
+  { id: 'workspace.close', key: 'cmd.closeFolder' },
+  { id: 'file.open', key: 'cmd.openFile', hint: 'Ctrl+O' },
+  { id: 'file.save', key: 'cmd.save', hint: 'Ctrl+S' },
+  { id: 'file.saveAll', key: 'cmd.saveAll' },
+  { id: 'file.close', key: 'cmd.closeEditor', hint: 'Ctrl+W' },
+  { id: 'editor.find', key: 'cmd.findInFile', hint: 'Ctrl+F' },
+  { id: 'search.open', key: 'cmd.findInFiles', hint: 'Ctrl+Shift+F' },
+  { id: 'quickopen.open', key: 'cmd.gotoFile', hint: 'Ctrl+P' },
+  { id: 'view.explorer', key: 'cmd.viewExplorer' },
+  { id: 'view.search', key: 'cmd.viewSearch' },
+  { id: 'view.git', key: 'cmd.viewGit' },
+  { id: 'view.terminal', key: 'cmd.viewTerminal' },
+  { id: 'layout.sidebar', key: 'cmd.toggleSidebar', hint: 'Ctrl+B' },
+  { id: 'layout.panel', key: 'cmd.togglePanel', hint: 'Ctrl+J' },
+  { id: 'layout.chat', key: 'cmd.toggleAssistant', hint: 'Ctrl+Shift+A' },
+  { id: 'chat.new', key: 'cmd.newChat' },
+  { id: 'chat.cancel', key: 'cmd.cancelTurn' },
+  { id: 'chat.focus', key: 'cmd.focusComposer', hint: 'Ctrl+L' },
+  { id: 'chat.settings', key: 'cmd.agentSettings' },
+  { id: 'chat.restart', key: 'cmd.restartAgent' },
+  { id: 'git.refresh', key: 'cmd.gitRefresh' },
+  { id: 'theme.toggle', key: 'cmd.switchTheme' },
+  { id: 'language.change', key: 'cmd.switchLanguage' },
+  { id: 'about', key: 'cmd.about' }
 ];
 
 function openPalette(mode, seed = '') {
@@ -280,7 +293,7 @@ function openPalette(mode, seed = '') {
   palette.index = 0;
   dom.overlay.hidden = false;
   dom.paletteInput.value = seed;
-  dom.paletteInput.placeholder = mode === 'files' ? 'file name' : 'command name';
+  dom.paletteInput.placeholder = mode === 'files' ? t('palette.files') : t('palette.commands');
   if (mode === 'files') {
     void explorer.files().then((files) => {
       palette.files = files;
@@ -302,12 +315,12 @@ function renderPalette() {
   palette.items =
     palette.mode === 'files'
       ? rank(palette.files, query, 80)
-      : COMMANDS.map((command) => ({ label: command.label, id: command.id, hint: command.hint }))
+      : COMMANDS.map((command) => ({ label: t(command.key), id: command.id, hint: command.hint }))
           .filter((command) => !query || command.label.toLowerCase().includes(query.toLowerCase()))
           .slice(0, 80);
   dom.paletteList.replaceChildren();
   if (!palette.items.length) {
-    dom.paletteList.append(el('div', { class: 'list__empty', text: 'Nothing matches.' }));
+    dom.paletteList.append(el('div', { class: 'list__empty', text: t('palette.nothing') }));
     dom.paletteHint.textContent = '';
     return;
   }
@@ -323,7 +336,7 @@ function renderPalette() {
     );
   });
   dom.paletteHint.textContent =
-    palette.mode === 'files' ? 'Enter opens · Esc closes' : 'Enter runs · Esc closes';
+    palette.mode === 'files' ? t('palette.openFile') : t('palette.run');
   const selected = dom.paletteList.children[palette.index];
   if (selected && selected.scrollIntoView) selected.scrollIntoView({ block: 'nearest' });
 }
@@ -357,9 +370,51 @@ async function restartAgent() {
 }
 
 function updateTitle() {
-  const name = workspace ? workspace.name : 'no folder';
-  document.title = `LexiQode — ${name}`;
-  if (dom.brand) dom.brand.textContent = 'LexiQode';
+  const name = workspace ? workspace.name : t('status.noFolder');
+  document.title = `${t('app.name')} — ${name}`;
+  if (dom.brand) dom.brand.textContent = t('app.name');
+}
+
+/**
+ * What fills the editor area when nothing is open.
+ *
+ * With no folder it offers the two things that make sense - open one, or pick up
+ * a recent one - instead of leaving a blank rectangle, and it is why the app does
+ * not open a folder on start any more: this screen is the alternative.
+ */
+function renderWelcome() {
+  const host = document.getElementById('welcome');
+  if (!host) return;
+  host.replaceChildren();
+  if (workspace) return;
+  const recent = (settingsValue.recent || []).slice(0, 8);
+  const list = el('div', { class: 'welcome__recent' });
+  for (const entry of recent) {
+    list.append(
+      el('button', {
+        class: 'btn',
+        type: 'button',
+        text: entry.name || entry.path,
+        title: entry.path,
+        onclick: () => void api.workspace.open(entry.path).catch((error) => toast('error', error.message))
+      })
+    );
+  }
+  host.append(
+    el('h1', { text: t('welcome.title') }),
+    el('div', { text: t('welcome.hint') }),
+    el('div', { class: 'welcome__actions' }, [
+      el('button', {
+        class: 'btn btn--primary',
+        type: 'button',
+        text: t('welcome.open'),
+        onclick: () => void openFolder()
+      })
+    ]),
+    recent.length ? el('div', { class: 'welcome__keys', text: t('welcome.recent') }) : null,
+    recent.length ? list : null,
+    el('div', { class: 'welcome__keys', text: t('welcome.keys') })
+  );
 }
 
 async function runCommand(name, argument) {
@@ -380,7 +435,7 @@ async function runCommand(name, argument) {
           const relative = file.slice(workspace.root.length + 1).split('\\').join('/');
           await editor.open(relative);
         } else {
-          toast('warn', `${file} is outside the open folder; open its folder first`);
+          toast('warn', t('toast.outsideFolder', { path: file }));
         }
       }
       break;
@@ -454,8 +509,19 @@ async function runCommand(name, argument) {
       applyAppearance();
       break;
     }
+    case 'language.change': {
+      // Cycles the window language: the system's own, then each dictionary that
+      // ships with the app. The setting is the same one the settings form shows.
+      const order = ['system', ...i18nInfo().available];
+      const index = order.indexOf(settingsValue.appearance.language);
+      const next = order[(index + 1) % order.length];
+      settingsValue.appearance.language = next;
+      persist({ appearance: { language: next } });
+      toast('info', t('toast.language', { language: next === 'system' ? t('settings.languageSystem') : next.toUpperCase() }));
+      break;
+    }
     case 'about':
-      toast('info', `LexiQode · agent ${state_agentSummary()}`, { timeout: 9000 });
+      toast('info', t('app.about', { state: state_agentSummary() }), { timeout: 9000 });
       break;
     default:
       break;
@@ -609,8 +675,24 @@ function wireEvents() {
   });
 
   api.on(CH.settingsChanged, (value) => {
+    const languageChanged = value.appearance.language !== settingsValue.appearance.language;
     settingsValue = value;
     applyAppearance();
+    if (!languageChanged) return;
+    // A language change redraws everything the window built itself: the static
+    // markup is handled by `initI18n`, and these are the parts that were already
+    // drawn from the previous dictionary.
+    void api.app
+      .i18n()
+      .then((payload) => {
+        initI18n(payload);
+        renderActivity();
+        renderStatusbar();
+        renderWelcome();
+        updateTitle();
+        chat.reload();
+      })
+      .catch(() => {});
   });
 
   api.on(CH.workspaceChanged, (value) => {
@@ -619,14 +701,19 @@ function wireEvents() {
     renderStatusbar();
     editor.closeAll();
     if (!workspace) {
-      toast('info', 'the folder was closed');
+      toast('info', t('toast.folderClosed'));
+      renderWelcome();
+      chat.reload();
       return;
     }
     void (async () => {
       await mountActivity();
       await refreshGit({ mount: true });
       await editor.restore(settingsValue.session);
-      chat.renderContext();
+      // The core is per folder, so the transcript now belongs to a different
+      // conversation; redrawing it is what keeps the panel honest.
+      await chat.reload();
+      renderWelcome();
       persistSession();
     })();
   });
@@ -653,6 +740,9 @@ function wireEvents() {
 
 async function boot() {
   settingsValue = await api.settings.get();
+  // The dictionary arrives before anything is drawn, so the first paint is
+  // already in the user's language instead of flashing English.
+  initI18n(await api.app.i18n().catch(() => null));
   if (settingsValue.layout.activity) currentActivity = settingsValue.layout.activity;
   applyAppearance();
 
@@ -715,16 +805,15 @@ async function boot() {
   workspace = await api.workspace.current();
   updateTitle();
   renderStatusbar();
+  renderWelcome();
   if (workspace) {
     await mountActivity();
     await refreshGit({ mount: true });
     await editor.restore(settingsValue.session);
     chat.renderContext();
   } else if (currentActivity === 'explorer') {
-    document.getElementById('sidebar-title').textContent = 'Explorer';
-    document.getElementById('sidebar-body').replaceChildren(
-      el('div', { class: 'list__empty', text: 'No folder is open. Press Ctrl+K Ctrl+O to open one.' })
-    );
+    // The explorer draws its own explanation, in the current language.
+    await mountActivity();
   }
 
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
@@ -736,7 +825,7 @@ boot().catch((error) => {
   // A window that fails to boot must say why, in the window, because the
   // developer console is not where a user looks.
   document.body.append(
-    el('div', { class: 'list__empty', text: `LexiQode could not start: ${error.message}` })
+    el('div', { class: 'list__empty', text: t('app.bootFailed', { message: error.message }) })
   );
   console.error(error);
 });

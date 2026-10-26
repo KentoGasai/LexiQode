@@ -64,7 +64,12 @@ const ICONS = {
   revert:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 9h9a5 5 0 0 1 0 10H8"/><path d="M8 5 4 9l4 4"/></svg>',
   branch:
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 4v16"/><circle cx="6" cy="8" r="2"/><path d="M6 12h6a4 4 0 0 0 4-4V6"/><circle cx="16" cy="4" r="2"/></svg>'
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 4v16"/><circle cx="6" cy="8" r="2"/><path d="M6 12h6a4 4 0 0 0 4-4V6"/><circle cx="16" cy="4" r="2"/></svg>',
+  chevron: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 9 6 6 6-6"/></svg>',
+  ask: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M20 12a7 7 0 0 1-7 7H9l-4 3v-4.5A7 7 0 0 1 9 5h4a7 7 0 0 1 7 7z"/><path d="M12 9.5a1.4 1.4 0 0 1 2.4 1c0 1-1.4 1.2-1.4 2.4"/><path d="M13 15.4h.01"/></svg>',
+  plan: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6h9M4 12h13M4 18h7"/><path d="M17.5 4.5 20 7l-2.5 2.5"/></svg>',
+  bug: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="8" y="7" width="8" height="11" rx="4"/><path d="M12 3v4M4.5 9 8 11M19.5 9 16 11M4.5 15 8 13M19.5 15 16 13M9 20l1-2M15 20l-1-2"/></svg>',
+  review: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2.5 12S6 6.5 12 6.5 21.5 12 21.5 12 18 17.5 12 17.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.6"/></svg>'
 };
 
 export function icon(name) {

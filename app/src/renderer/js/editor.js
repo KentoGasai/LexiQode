@@ -13,6 +13,7 @@
  */
 
 const MONACO_ROOT = 'vendor/monaco/vs';
+import { t } from './i18n.js';
 
 let monacoPromise = null;
 
@@ -195,11 +196,11 @@ export async function createEditor({ api, settings, onDirtyChange, onActiveChang
       return;
     }
     if (file.binary) {
-      onNotice?.(`${path} looks binary and is not opened as text`, 'warn');
+      onNotice?.(t('toast.binary', { path }), 'warn');
       return;
     }
     if (file.tooLarge) {
-      onNotice?.(`${path} is larger than the view limit and was not opened`, 'warn');
+      onNotice?.(t('toast.tooLarge', { path }), 'warn');
       return;
     }
 
@@ -261,7 +262,7 @@ export async function createEditor({ api, settings, onDirtyChange, onActiveChang
     const tab = tabs.get(path);
     if (!tab || tab.readOnly) return false;
     if (!isDirty(path)) {
-      if (!quiet) onNotice?.(`${path} has no changes`, 'info');
+      if (!quiet) onNotice?.(t('toast.noChanges', { path }), 'info');
       return false;
     }
     try {
@@ -274,7 +275,7 @@ export async function createEditor({ api, settings, onDirtyChange, onActiveChang
       tab.savedVersionId = tab.model.getAlternativeVersionId();
       renderTabs();
       onDirtyChange?.(path, false);
-      if (!quiet) onNotice?.(`saved ${path}`, 'ok');
+      if (!quiet) onNotice?.(t('toast.saved', { path }), 'ok');
       return true;
     } catch (error) {
       onNotice?.(error.message, 'error');
@@ -287,7 +288,7 @@ export async function createEditor({ api, settings, onDirtyChange, onActiveChang
     for (const path of [...tabs.keys()]) {
       if (await save(path, { quiet: true })) saved += 1;
     }
-    if (saved) onNotice?.(`saved ${saved} file${saved === 1 ? '' : 's'}`, 'ok');
+    if (saved) onNotice?.(t('toast.savedMany', { count: saved }), 'ok');
   }
 
   async function closeTab(path) {
@@ -295,10 +296,10 @@ export async function createEditor({ api, settings, onDirtyChange, onActiveChang
     if (!tab) return;
     if (isDirty(path)) {
       const answer = await api.dialogs.confirm({
-        message: `Save changes to ${path} before closing?`,
-        detail: 'Closing without saving discards the changes in this tab.',
-        confirmLabel: 'Save',
-        cancelLabel: 'Discard'
+        message: t('toast.saveBeforeClose', { path }),
+        detail: t('toast.saveBeforeCloseDetail'),
+        confirmLabel: t('toast.saveAction'),
+        cancelLabel: t('toast.discardAction')
       });
       if (answer) await save(path, { quiet: true });
     }

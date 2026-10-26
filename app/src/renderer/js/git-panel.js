@@ -12,6 +12,7 @@
  */
 
 import { clear, el, iconButton, toast } from './ui.js';
+import { t } from './i18n.js';
 
 export function createGitPanel({ api, onOpenDiff, onNotice }) {
   const host = document.getElementById('sidebar-body');
@@ -20,7 +21,7 @@ export function createGitPanel({ api, onOpenDiff, onNotice }) {
 
   let status = null;
   let commits = [];
-  const message = el('textarea', { rows: '2', placeholder: 'Commit message (Ctrl+Enter to commit)' });
+  const message = el('textarea', { rows: '2', placeholder: t('git.commitPlaceholder') });
   message.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
       event.preventDefault();
@@ -42,15 +43,15 @@ export function createGitPanel({ api, onOpenDiff, onNotice }) {
       ]),
       el('span', { class: 'git__actions' }, [
         side === 'staged'
-          ? iconButton('revert', 'Unstage', (event) => {
+          ? iconButton('revert', t('git.unstage'), (event) => {
               event.stopPropagation();
-              void act(() => api.git.unstage([name]), `unstaged ${name}`);
+              void act(() => api.git.unstage([name]), t('git.unstagedNotice', { path: name }));
             })
-          : iconButton('check', 'Stage', (event) => {
+          : iconButton('check', t('git.stage'), (event) => {
               event.stopPropagation();
-              void act(() => api.git.stage([name]), `staged ${name}`);
+              void act(() => api.git.stage([name]), t('git.stagedNotice', { path: name }));
             }),
-        iconButton('close', 'Discard changes', (event) => {
+        iconButton('close', t('git.discard'), (event) => {
           event.stopPropagation();
           void discard(name);
         })
@@ -76,22 +77,22 @@ export function createGitPanel({ api, onOpenDiff, onNotice }) {
 
   async function discard(path) {
     const confirmed = await api.dialogs.confirm({
-      message: `Discard changes in ${path}?`,
-      detail: 'This cannot be undone: the file returns to its last committed state.',
+      message: t('git.discardConfirm', { path }),
+      detail: t('git.discardDetail'),
       danger: true,
-      confirmLabel: 'Discard'
+      confirmLabel: t('git.discardAction')
     });
-    if (confirmed) await act(() => api.git.discard([path]), `discarded changes in ${path}`);
+    if (confirmed) await act(() => api.git.discard([path]), t('git.discardedNotice', { path }));
   }
 
   async function commit() {
     const text = message.value.trim();
     if (!text) {
-      toast('warn', 'a commit message is required');
+      toast('warn', t('git.commitNeedsMessage'));
       return;
     }
     if (!status || !status.staged.length) {
-      toast('warn', 'nothing is staged');
+      toast('warn', t('git.nothingStaged'));
       return;
     }
     try {
@@ -101,7 +102,7 @@ export function createGitPanel({ api, onOpenDiff, onNotice }) {
         return;
       }
       message.value = '';
-      onNotice?.(`committed ${status.staged.length} file(s)`, 'ok');
+      onNotice?.(t('git.committed', { count: status.staged.length }), 'ok');
       await refresh();
     } catch (error) {
       toast('error', error.message);
@@ -118,8 +119,9 @@ export function createGitPanel({ api, onOpenDiff, onNotice }) {
         ? el('button', {
             class: 'panel__tab',
             type: 'button',
-            text: 'stage all',
-            onclick: () => void act(() => api.git.stage(entries.map((entry) => entry.path)), 'staged everything')
+            text: t('git.stageAll'),
+            onclick: () =>
+              void act(() => api.git.stage(entries.map((entry) => entry.path)), t('git.stagedAll'))
           })
         : null
     ]);
@@ -145,7 +147,7 @@ export function createGitPanel({ api, onOpenDiff, onNotice }) {
     }
     if (!status.repo) {
       host.append(
-        el('div', { class: 'list__empty', text: status.reason || 'This folder is not a git repository.' })
+        el('div', { class: 'list__empty', text: status.reason || t('git.noRepo') })
       );
       return;
     }
@@ -162,30 +164,30 @@ export function createGitPanel({ api, onOpenDiff, onNotice }) {
   function render() {
     clear(host);
     const branch = el('div', { class: 'field' }, [
-      el('span', { class: 'git__branch', text: status.branch || '(no branch)' }),
+      el('span', { class: 'git__branch', text: status.branch || t('git.noBranch') }),
       el('span', {
         class: 'section__count',
         text: [status.ahead ? `↑${status.ahead}` : '', status.behind ? `↓${status.behind}` : '']
           .filter(Boolean)
           .join(' ')
       }),
-      iconButton('branch', 'Switch branch', () => void switchBranch()),
-      iconButton('refresh', 'Refresh', () => void refresh())
+      iconButton('branch', t('git.branchPrompt'), () => void switchBranch()),
+      iconButton('refresh', t('git.refresh'), () => void refresh())
     ]);
     host.append(branch, el('div', { class: 'commit' }, [message])); 
 
     const stagedEntries = status.entries.filter((entry) => status.staged.includes(entry.path) || entry.kind === 'staged');
     const changedEntries = status.entries.filter((entry) => !stagedEntries.includes(entry));
-    const staged = group('Staged', stagedEntries, 'staged');
-    const changed = group('Changes', changedEntries, 'unstaged');
+    const staged = group(t('git.staged'), stagedEntries, 'staged');
+    const changed = group(t('git.changes'), changedEntries, 'unstaged');
     if (staged) host.append(staged);
     if (changed) host.append(changed);
     if (!stagedEntries.length && !changedEntries.length) {
-      host.append(el('div', { class: 'list__empty', text: 'Working tree clean.' }));
+      host.append(el('div', { class: 'list__empty', text: t('git.clean') }));
     }
     if (commits.length) {
       const section = el('div', { class: 'section' });
-      section.append(el('div', { class: 'section__head' }, [el('span', { text: 'Recent commits' })]));
+      section.append(el('div', { class: 'section__head' }, [el('span', { text: t('git.recentCommits') })]));
       for (const entry of commits) {
         section.append(
           el('div', { class: 'hit', title: entry.hash }, [
@@ -206,22 +208,24 @@ export function createGitPanel({ api, onOpenDiff, onNotice }) {
     }
     const list = result.branches;
     const answer = window.prompt(
-      `Checkout which branch?\n\n${list.map((branch, index) => `${index + 1}. ${branch.name}${branch.current ? ' (current)' : ''}`).join('\n')}`,
+      `${t('git.branchPrompt')}\n\n${list
+        .map((branch, index) => `${index + 1}. ${branch.name}${branch.current ? ' (current)' : ''}`)
+        .join('\n')}`,
       String(Math.max(1, list.findIndex((branch) => branch.current) + 1))
     );
     const index = Number(answer);
     if (!Number.isInteger(index) || index < 1 || index > list.length) return;
     const target = list[index - 1];
     if (target.current) return;
-    await act(() => api.git.checkout(target.name), `on ${target.name}`);
+    await act(() => api.git.checkout(target.name), t('git.onBranch', { name: target.name }));
   }
 
   function mount() {
-    title.textContent = 'Source Control';
+    title.textContent = t('view.git');
     clear(actions);
-    actions.append(iconButton('refresh', 'Refresh status', () => void refresh()));
+    actions.append(iconButton('refresh', t('git.refresh'), () => void refresh()));
     clear(host);
-    host.append(el('div', { class: 'list__empty', text: 'Reading git…' }));
+    host.append(el('div', { class: 'list__empty', text: t('git.reading') }));
     void refresh();
   }
 

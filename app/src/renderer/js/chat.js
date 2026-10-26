@@ -17,16 +17,40 @@
  * only.
  */
 
-import { clear, el, toast } from './ui.js';
+import { clear, debounce, el, icon, toast } from './ui.js';
 import { renderMarkdown, toPlainText } from './markdown.js';
+import { current as i18nInfo, t } from './i18n.js';
 
-const FALLBACK_MODES = [
-  { id: 'agent', label: 'Agent', hint: 'Do the work: read, edit and run what the task needs.' },
-  { id: 'ask', label: 'Ask', hint: 'Answer from what is already known. No edits, no commands.' },
-  { id: 'plan', label: 'Plan', hint: 'Read and propose a plan. Nothing is changed.' },
-  { id: 'debug', label: 'Debug', hint: 'Find the cause, then fix it and prove the fix.' },
-  { id: 'review', label: 'Review', hint: 'Read the change and report problems. No edits.' }
-];
+/**
+ * The five modes, by id: an icon and the two keys that name them.
+ *
+ * The ids are the core's; the labels are the window's. A mode the core gains
+ * before this list knows about it still appears, labelled with its id, which is
+ * better than a mode that silently cannot be chosen.
+ */
+const MODE_INFO = {
+  agent: { icon: 'spark', label: 'chat.modeAgent', hint: 'chat.modeAgentHint' },
+  ask: { icon: 'ask', label: 'chat.modeAsk', hint: 'chat.modeAskHint' },
+  plan: { icon: 'plan', label: 'chat.modePlan', hint: 'chat.modePlanHint' },
+  debug: { icon: 'bug', label: 'chat.modeDebug', hint: 'chat.modeDebugHint' },
+  review: { icon: 'review', label: 'chat.modeReview', hint: 'chat.modeReviewHint' }
+};
+
+function modeIcon(id) {
+  return (MODE_INFO[id] && MODE_INFO[id].icon) || 'spark';
+}
+
+function modeLabel(id) {
+  return MODE_INFO[id] ? t(MODE_INFO[id].label) : id;
+}
+
+function modeHint(id) {
+  return MODE_INFO[id] ? t(MODE_INFO[id].hint) : '';
+}
+
+function knownModes() {
+  return Object.keys(MODE_INFO).map((id) => ({ id, label: modeLabel(id), hint: modeHint(id) }));
+}
 
 export function createChat({ api, bus, settings, onNotice, editor }) {
   const transcript = document.getElementById('transcript');
@@ -36,19 +60,20 @@ export function createChat({ api, bus, settings, onNotice, editor }) {
   const modesHost = document.getElementById('composer-modes');
   const contextHost = document.getElementById('composer-context');
   const dot = document.getElementById('chat-dot');
+  const stateLabel = document.getElementById('chat-state');
   const actions = document.getElementById('chat-actions');
-  const agentChip = document.getElementById('titlebar-agent');
 
   const state = {
-    modes: FALLBACK_MODES,
-    mode: FALLBACK_MODES[0].id,
+    modes: knownModes(),
+    mode: 'agent',
     agent: { state: 'stopped', detail: '' },
     running: false,
     current: null,
     reasoning: null,
     tools: new Map(),
     approvals: new Map(),
-    settingsOpen: false
+    settingsOpen: false,
+    modeOpen: false
   };
 
   // ------------------------------------------------------------- transcript
@@ -147,10 +172,10 @@ export function createChat({ api, bus, settings, onNotice, editor }) {
       created.result = payload.result || payload.output || payload.message || '';
       const failed = payload.ok === false || payload.error || payload.status === 'error';
       created.node.dataset.state = failed ? 'failed' : 'done';
-      created.stateNode.textContent = failed ? 'failed' : 'done';
+      created.stateNode.textContent = failed ? t('tool.failed') : t('tool.done');
     } else {
       created.node.dataset.state = 'running';
-      created.stateNode.textContent = 'running';
+      created.stateNode.textContent = t('tool.running');
     }
     created.label.textContent = created.name;
     created.detailNode.textContent = toPlainText(String(created.detail), 90);
@@ -164,16 +189,16 @@ export function createChat({ api, bus, settings, onNotice, editor }) {
     const what = payload.detail || payload.command || payload.path || payload.summary || 'the agent wants to continue';
     const node = el('div', { class: 'approval' });
     node.append(
-      el('div', { class: 'turn__who' }, [el('span', { class: 'turn__role', text: 'approval needed' })]),
+      el('div', { class: 'turn__who' }, [el('span', { class: 'turn__role', text: t('chat.approvalNeeded') })]),
       el('div', { class: 'approval__what', text: `${payload.tool || payload.name || 'action'}\n${what}` }),
       el('div', { class: 'approval__row' }, [
         el('button', {
           class: 'btn btn--primary',
           type: 'button',
-          text: 'Approve',
+          text: t('chat.approve'),
           onclick: () => void decide(id, true, node)
         }),
-        el('button', { class: 'btn', type: 'button', text: 'Deny', onclick: () => void decide(id, false, node) })
+        el('button', { class: 'btn', type: 'button', text: t('chat.deny'), onclick: () => void decide(id, false, node) })
       ])
     );
     transcript.append(node);
@@ -196,10 +221,14 @@ export function createChat({ api, bus, settings, onNotice, editor }) {
   function applyStatus(status) {
     state.agent = status || { state: 'stopped', detail: '' };
     const known = ['ready', 'starting', 'error'];
+    const key = known.includes(state.agent.state) ? state.agent.state : 'off';
     dot.dataset.state = known.includes(state.agent.state) ? state.agent.state : 'off';
-    dot.title = state.agent.detail || state.agent.state;
-    agentChip.textContent = `agent: ${state.agent.state}`;
-    agentChip.title = state.agent.detail || '';
+    dot.title = state.agent.detail || t(`agent.${key}`);
+    if (stateLabel) {
+      stateLabel.textContent = t(`agent.${key}`);
+      stateLabel.title = state.agent.detail || '';
+      stateLabel.dataset.state = key;
+    }
     if (state.agent.state !== 'ready') {
       state.running = false;
       renderRunning();
@@ -209,7 +238,7 @@ export function createChat({ api, bus, settings, onNotice, editor }) {
   function renderRunning() {
     stopButton.hidden = !state.running;
     sendButton.disabled = state.running;
-    sendButton.textContent = state.running ? 'Working…' : 'Send';
+    sendButton.textContent = state.running ? t('chat.working') : t('chat.send');
   }
 
   function handleEvent(event) {
@@ -260,14 +289,14 @@ export function createChat({ api, bus, settings, onNotice, editor }) {
         state.current = null;
         renderRunning();
         if (data.stopped && data.stopped !== 'completed') {
-          toast('warn', `the turn stopped: ${data.stopped}`);
+          toast('warn', t('chat.turnStopped', { reason: data.stopped }));
         }
         break;
       }
       case 'error':
         state.running = false;
         renderRunning();
-        addError(data.message || 'the agent reported an error');
+        addError(data.message || t('chat.error'));
         break;
       default:
         if (data.request_id || data.approval_id) approvalCard(data);
@@ -279,21 +308,76 @@ export function createChat({ api, bus, settings, onNotice, editor }) {
 
   function renderModes() {
     clear(modesHost);
-    for (const mode of state.modes) {
-      const button = el('button', {
-        class: 'mode',
-        type: 'button',
-        text: mode.label || mode.id,
-        title: mode.hint || mode.summary || mode.description || '',
-        'aria-pressed': String(mode.id === state.mode),
-        onclick: () => {
-          state.mode = mode.id;
-          renderModes();
-          void api.settings.update({ agent: { defaultMode: mode.id } }).catch(() => {});
-        }
-      });
-      modesHost.append(button);
+    const info = MODE_INFO[state.mode];
+    modesHost.append(
+      el(
+        'button',
+        {
+          class: 'modebtn',
+          type: 'button',
+          title: `${t('chat.mode')}: ${modeLabel(state.mode)} — ${modeHint(state.mode)}`,
+          'aria-haspopup': 'listbox',
+          'aria-expanded': String(state.modeOpen),
+          onclick: (event) => {
+            event.stopPropagation();
+            toggleModeList(!state.modeOpen);
+          }
+        },
+        [
+          el('span', { class: 'modebtn__icon', html: icon(modeIcon(state.mode)) }),
+          el('span', { class: 'modebtn__label', text: modeLabel(state.mode) }),
+          el('span', { class: 'modebtn__chevron', html: icon('chevron') })
+        ]
+      )
+    );
+    if (info === undefined) {
+      // A mode the core knows and this window does not: it is still selectable,
+      // and the tooltip says where the name came from.
+      modesHost.lastChild.title = state.mode;
     }
+    if (state.modeOpen) modesHost.append(renderModeList());
+  }
+
+  function renderModeList() {
+    const list = el('div', { class: 'modelist', role: 'listbox', 'aria-label': t('chat.mode') });
+    for (const mode of state.modes) {
+      const selected = mode.id === state.mode;
+      const row = el(
+        'button',
+        {
+          class: 'modelist__item',
+          type: 'button',
+          role: 'option',
+          'aria-selected': String(selected),
+          onclick: (event) => {
+            event.stopPropagation();
+            chooseMode(mode.id);
+          }
+        },
+        [
+          el('span', { class: 'modelist__icon', html: icon(modeIcon(mode.id)) }),
+          el('span', { class: 'modelist__text' }, [
+            el('span', { class: 'modelist__label', text: mode.label || modeLabel(mode.id) }),
+            el('span', { class: 'modelist__hint', text: mode.hint || modeHint(mode.id) })
+          ])
+        ]
+      );
+      list.append(row);
+    }
+    return list;
+  }
+
+  function toggleModeList(open) {
+    state.modeOpen = open;
+    renderModes();
+  }
+
+  function chooseMode(id) {
+    state.mode = id;
+    state.modeOpen = false;
+    renderModes();
+    void api.settings.update({ agent: { defaultMode: id } }).catch(() => {});
+    input.focus();
   }
 
   // ----------------------------------------------------------- the composer
@@ -304,17 +388,21 @@ export function createChat({ api, bus, settings, onNotice, editor }) {
     clear(contextHost);
     if (preferences.includeActiveFile && context.file) {
       contextHost.append(
-        el('span', { class: 'ctx' }, [el('span', { class: 'ctx__label', text: context.file })])
+        el('span', { class: 'ctx', title: t('chat.contextFile') }, [
+          el('span', { class: 'ctx__label', text: context.file })
+        ])
       );
     }
     if (preferences.includeSelection && context.selection) {
-      const lines = context.selectionRange
-        ? `lines ${context.selectionRange.start}–${context.selectionRange.end}`
-        : `${context.selection.length} chars`;
-      contextHost.append(el('span', { class: 'ctx' }, [el('span', { class: 'ctx__label', text: `selection · ${lines}` })]));
+      const label = context.selectionRange
+        ? t('chat.selection', { from: context.selectionRange.start, to: context.selectionRange.end })
+        : t('chat.selectionChars', { count: context.selection.length });
+      contextHost.append(el('span', { class: 'ctx' }, [el('span', { class: 'ctx__label', text: label })]));
     }
     if (context.dirty) {
-      contextHost.append(el('span', { class: 'ctx' }, [el('span', { class: 'ctx__label', text: 'unsaved changes' })]));
+      contextHost.append(
+        el('span', { class: 'ctx' }, [el('span', { class: 'ctx__label', text: t('chat.unsaved') })])
+      );
     }
   }
 
@@ -358,7 +446,7 @@ export function createChat({ api, bus, settings, onNotice, editor }) {
   async function cancel() {
     try {
       await api.agent.cancel();
-      toast('info', 'asked the agent to stop');
+      toast('info', t('chat.stopped'));
     } catch (error) {
       toast('error', error.message);
     }
@@ -375,7 +463,7 @@ export function createChat({ api, bus, settings, onNotice, editor }) {
     state.reasoning = null;
     state.tools.clear();
     state.approvals.clear();
-    onNotice?.('started a new conversation', 'ok');
+    onNotice?.(t('chat.newStarted'), 'ok');
   }
 
   // ------------------------------------------------------- agent settings
@@ -396,14 +484,18 @@ export function createChat({ api, bus, settings, onNotice, editor }) {
 
     const id = el('input', { type: 'text', value: profile.id || 'default' });
     const baseUrl = el('input', { type: 'text', value: profile.base_url || '', placeholder: 'https://host/v1' });
-    const apiKey = el('input', { type: 'password', value: '', placeholder: profile.has_api_key ? '(stored)' : 'sk-…' });
-    const model = el('input', { type: 'text', value: profile.model || '', placeholder: 'model id' });
+    const apiKey = el('input', {
+      type: 'password',
+      value: '',
+      placeholder: profile.has_api_key ? t('settings.apiKeyStored') : 'sk-…'
+    });
+    const model = el('input', { type: 'text', value: profile.model || '', placeholder: t('settings.modelPlaceholder') });
     const maxSteps = el('input', { type: 'text', value: String(agentSettings.max_steps ?? 12) });
     const commandTimeout = el('input', { type: 'text', value: String(agentSettings.command_timeout ?? 120) });
     const autoApprove = el('input', { type: 'checkbox', checked: Boolean(agentSettings.auto_approve) });
     const approveWrites = el('input', { type: 'checkbox', checked: Boolean(agentSettings.approve_writes) });
     const approveCommands = el('input', { type: 'checkbox', checked: Boolean(agentSettings.approve_commands) });
-    const models = el('div', { class: 'list__empty', text: 'The endpoint has not been asked yet.' });
+    const models = el('div', { class: 'list__empty', text: t('settings.scanHint') });
     const status = el('div', { class: 'list__empty', text: '' });
 
     async function save({ quiet = false } = {}) {
@@ -426,8 +518,8 @@ export function createChat({ api, bus, settings, onNotice, editor }) {
       try {
         await api.agent.saveProfile(patch);
         apiKey.value = '';
-        status.textContent = 'Saved.';
-        if (!quiet) onNotice?.('agent settings saved', 'ok');
+        status.textContent = t('settings.saved');
+        if (!quiet) onNotice?.(t('settings.savedNotice'), 'ok');
         await loadState();
         return true;
       } catch (error) {
@@ -437,63 +529,117 @@ export function createChat({ api, bus, settings, onNotice, editor }) {
       }
     }
 
-    async function listModels() {
-      models.textContent = 'Asking the endpoint…';
+    /**
+     * Ask the endpoint for its models, from what is typed rather than from what
+     * is saved.
+     *
+     * The scan runs on its own once the endpoint looks complete, because the
+     * point of the list is to save the user from knowing a model id by heart -
+     * and asking them to save first would answer a question about the previous
+     * endpoint. The signature keeps a keystroke from firing a request per
+     * character.
+     */
+    let scanned = '';
+    async function scanModels({ force = false } = {}) {
+      const endpoint = baseUrl.value.trim();
+      if (!endpoint) {
+        clear(models);
+        models.append(el('span', { text: t('settings.scanHint') }));
+        scanned = '';
+        return;
+      }
+      const signature = `${id.value.trim()}|${endpoint}|${apiKey.value.trim()}`;
+      if (!force && signature === scanned) return;
+      scanned = signature;
+      clear(models);
+      models.append(el('span', { class: 'spinner' }), el('span', { text: t('settings.scanning') }));
       try {
-        const result = await api.agent.models({ profile: id.value.trim() || 'default' });
+        const result = await api.agent.models({
+          profile: id.value.trim() || 'default',
+          baseUrl: endpoint,
+          apiKey: apiKey.value.trim()
+        });
         const names = (result && (result.models || result.data)) || [];
         clear(models);
         if (!names.length) {
-          models.append(el('span', { text: 'The endpoint listed no models.' }));
+          models.append(el('span', { text: t('settings.scanNone') }));
           return;
         }
-        models.append(el('span', { text: `${names.length} offered: ` }));
-        for (const name of names.slice(0, 40)) {
-          models.append(
-            el('button', {
-              class: 'panel__tab',
-              type: 'button',
-              text: String(name),
-              title: 'Use this model id',
-              onclick: () => {
-                model.value = String(name);
-              }
-            })
-          );
+        models.append(el('span', { text: t('settings.scanFound', { count: names.length }) }));
+        const picker = el('select', {
+          class: 'modelpick',
+          title: t('settings.useModel'),
+          onchange: () => {
+            if (picker.value) {
+              model.value = picker.value;
+              // Choosing from the list is not a reason to ask again.
+              scanned = `${id.value.trim()}|${baseUrl.value.trim()}|${apiKey.value.trim()}`;
+            }
+          }
+        });
+        picker.append(el('option', { value: '', text: t('settings.model') }));
+        for (const name of names.slice(0, 300)) {
+          picker.append(el('option', { value: String(name), text: String(name) }));
         }
+        models.append(picker);
       } catch (error) {
-        models.textContent = error.message;
+        clear(models);
+        models.append(el('span', { text: error.message }));
       }
     }
 
+    const scheduleScan = debounce(() => void scanModels(), 700);
+    for (const control of [id, baseUrl, apiKey]) control.addEventListener('input', scheduleScan);
+
+    // The window's own language, next to the agent's settings because this is
+    // the only settings surface the interface has.
+    const language = el('select', {
+      class: 'modelpick',
+      onchange: () => void api.settings.update({ appearance: { language: language.value } }).catch(() => {})
+    });
+    for (const code of ['system', ...i18nInfo().available]) {
+      language.append(
+        el('option', { value: code, text: code === 'system' ? t('settings.languageSystem') : code.toUpperCase() })
+      );
+    }
+    language.value = settings().appearance.language;
+
     const sheet = el('div', { class: 'commit' }, [
-      el('div', { class: 'turn__who' }, [el('span', { class: 'turn__role', text: 'agent settings' })]),
-      field('profile id', id),
-      field('endpoint', baseUrl),
-      field('api key', apiKey),
-      field('model', model),
-      field('max steps', maxSteps),
-      field('command timeout', commandTimeout),
+      el('div', { class: 'turn__who' }, [el('span', { class: 'turn__role', text: t('settings.title') })]),
+      field(t('settings.profile'), id),
+      field(t('settings.endpoint'), baseUrl),
+      field(t('settings.apiKey'), apiKey),
+      field(t('settings.model'), model),
+      field(t('settings.maxSteps'), maxSteps),
+      field(t('settings.commandTimeout'), commandTimeout),
+      field(t('settings.language'), language),
       el('div', { class: 'field__row' }, [
-        el('label', {}, [autoApprove, el('span', { text: 'run without asking' })]),
-        el('label', {}, [approveWrites, el('span', { text: 'ask before writes' })]),
-        el('label', {}, [approveCommands, el('span', { text: 'ask before commands' })])
+        el('label', {}, [autoApprove, el('span', { text: t('settings.autoApprove') })]),
+        el('label', {}, [approveWrites, el('span', { text: t('settings.askWrites') })]),
+        el('label', {}, [approveCommands, el('span', { text: t('settings.askCommands') })])
       ]),
       el('div', { class: 'approval__row' }, [
         el('button', {
           class: 'btn btn--primary',
           type: 'button',
-          text: 'Save & test',
+          text: t('settings.saveTest'),
           onclick: async () => {
-            if (await save({ quiet: true })) await listModels();
+            if (await save({ quiet: true })) await scanModels({ force: true });
           }
         }),
-        el('button', { class: 'btn', type: 'button', text: 'Save', onclick: () => void save() }),
-        el('button', { class: 'btn btn--ghost', type: 'button', text: 'Close', onclick: () => toggleSettings(false) })
+        el('button', { class: 'btn', type: 'button', text: t('settings.save'), onclick: () => void save() }),
+        el('button', {
+          class: 'btn btn--ghost',
+          type: 'button',
+          text: t('settings.close'),
+          onclick: () => toggleSettings(false)
+        })
       ]),
       models,
       status
     ]);
+    // A form opened on a saved profile shows its models without being asked.
+    if (baseUrl.value.trim()) setTimeout(() => void scanModels(), 0);
     return sheet;
   }
 
@@ -524,8 +670,11 @@ export function createChat({ api, bus, settings, onNotice, editor }) {
       if (Array.isArray(snapshot.modes) && snapshot.modes.length) {
         state.modes = snapshot.modes.map((mode) => ({
           id: mode.id || mode.mode || 'agent',
-          label: mode.label || mode.title || mode.id || 'Agent',
-          hint: mode.hint || mode.summary || mode.description || ''
+          // The core names the modes in English; the window knows them by id and
+          // shows its own wording, falling back to the core's for a mode it has
+          // not been taught yet.
+          label: MODE_INFO[mode.id] ? modeLabel(mode.id) : mode.label || mode.title || mode.id || 'Agent',
+          hint: MODE_INFO[mode.id] ? modeHint(mode.id) : mode.hint || mode.summary || mode.description || ''
         }));
       }
       if (!state.modes.some((mode) => mode.id === state.mode)) {
@@ -546,6 +695,10 @@ export function createChat({ api, bus, settings, onNotice, editor }) {
     try {
       const snapshot = await api.agent.history();
       const messages = (snapshot && snapshot.messages) || [];
+      if (!messages.length) {
+        transcript.append(el('div', { class: 'list__empty', text: t('chat.empty') }));
+        return;
+      }
       for (const message of messages) {
         const text = stripContext(String(message.content || ''));
         if (!text.trim()) continue;
@@ -573,21 +726,38 @@ export function createChat({ api, bus, settings, onNotice, editor }) {
   input.addEventListener('focus', renderContext);
   sendButton.addEventListener('click', () => void send());
   stopButton.addEventListener('click', () => void cancel());
+  // A dropdown closes when the click lands anywhere else, which is what every
+  // other dropdown on this platform does.
+  document.addEventListener('click', () => {
+    if (state.modeOpen) toggleModeList(false);
+  });
 
   async function mount() {
     clear(actions);
     actions.append(
-      el('button', { class: 'iconbtn', type: 'button', title: 'New conversation', text: '＋', onclick: () => void reset() }),
-      el('button', { class: 'iconbtn', type: 'button', title: 'Agent settings', text: '⚙', onclick: () => toggleSettings() }),
       el('button', {
         class: 'iconbtn',
         type: 'button',
-        title: 'Ask the endpoint for its models',
+        title: t('chat.newConversation'),
+        text: '＋',
+        onclick: () => void reset()
+      }),
+      el('button', {
+        class: 'iconbtn',
+        type: 'button',
+        title: t('chat.settings'),
+        text: '⚙',
+        onclick: () => toggleSettings()
+      }),
+      el('button', {
+        class: 'iconbtn',
+        type: 'button',
+        title: t('chat.reload'),
         text: '↻',
         onclick: () => void loadState()
       })
     );
-    applyStatus(await api.agent.status().catch(() => ({ state: 'stopped', detail: 'the agent is not running' })));
+    applyStatus(await api.agent.status().catch(() => ({ state: 'stopped', detail: '' })));
     renderModes();
     renderContext();
     renderRunning();
@@ -596,5 +766,26 @@ export function createChat({ api, bus, settings, onNotice, editor }) {
     grow();
   }
 
-  return { mount, send, cancel, reset, toggleSettings, renderContext, focus: () => input.focus(), state };
+  /**
+   * Draw the conversation again from the core.
+   *
+   * Used when the workspace changes: the core is bound to a folder, so its
+   * transcript is now a different one and the panel must not keep showing the
+   * previous folder's conversation.
+   */
+  async function reload() {
+    clear(transcript);
+    state.current = null;
+    state.reasoning = null;
+    state.tools.clear();
+    state.approvals.clear();
+    state.modeOpen = false;
+    await loadState();
+    await loadHistory();
+    renderContext();
+    renderRunning();
+    grow();
+  }
+
+  return { mount, send, cancel, reset, reload, toggleSettings, renderContext, focus: () => input.focus(), state };
 }

@@ -14,6 +14,7 @@
  */
 
 import { clear, el, iconButton } from './ui.js';
+import { t } from './i18n.js';
 
 export function createTerminalPanel({ api, bus, settings, onNotice }) {
   const body = document.getElementById('panel-body');
@@ -29,7 +30,7 @@ export function createTerminalPanel({ api, bus, settings, onNotice }) {
   const input = el('input', {
     class: 'terminal__field',
     type: 'text',
-    placeholder: 'command, then Enter  (↑ recalls history)',
+    placeholder: t('terminal.placeholder'),
     spellcheck: 'false',
     autocomplete: 'off',
     onkeydown: (event) => {
@@ -59,7 +60,7 @@ export function createTerminalPanel({ api, bus, settings, onNotice }) {
     }
   });
   const promptLabel = el('span', { class: 'terminal__prompt', text: '…' });
-  const note = el('span', { class: 'terminal__note', text: 'piped shell · no full-screen apps' });
+  const note = el('span', { class: 'terminal__note', text: t('terminal.note') });
   const inputRow = el('div', { class: 'terminal__input' }, [promptLabel, input, note]);
 
   async function submit(command) {
@@ -96,7 +97,7 @@ export function createTerminalPanel({ api, bus, settings, onNotice }) {
     clear(body);
     const session = sessions.get(current);
     if (!session) {
-      body.append(el('div', { class: 'list__empty', text: 'No terminal is open. Press the + button.' }));
+      body.append(el('div', { class: 'list__empty', text: t('terminal.empty') }));
       return;
     }
     const host = el('div', { class: 'terminal' });
@@ -129,8 +130,8 @@ export function createTerminalPanel({ api, bus, settings, onNotice }) {
   function renderActions() {
     clear(actions);
     actions.append(
-      iconButton('plus', 'New terminal', () => void open()),
-      iconButton('close', 'Close this terminal', () => void closeCurrent())
+      iconButton('plus', t('terminal.new'), () => void open()),
+      iconButton('close', t('terminal.close'), () => void closeCurrent())
     );
   }
 
@@ -162,7 +163,7 @@ export function createTerminalPanel({ api, bus, settings, onNotice }) {
         root: workspace ? workspace.root : ''
       });
       term.writeln(`\x1b[90m${session.shell} · ${session.cwd}\x1b[0m`);
-      term.writeln('\x1b[90mThis panel runs commands in a piped shell: build tools, git, python and npm work; full-screen programs do not.\x1b[0m');
+      term.writeln(`\x1b[90m${t('terminal.intro')}\x1b[0m`);
       term.onData((data) => {
         if (data === '\r') input.focus();
       });
@@ -206,7 +207,7 @@ export function createTerminalPanel({ api, bus, settings, onNotice }) {
   bus.on('terminal:exit', (payload) => {
     const session = sessions.get(payload && payload.id);
     if (!session) return;
-    session.term.writeln(`\r\n\x1b[90m[session ended with code ${payload.code}]\x1b[0m`);
+    session.term.writeln(`\r\n\x1b[90m${t('terminal.ended', { code: payload.code })}\x1b[0m`);
   });
 
   function mount() {

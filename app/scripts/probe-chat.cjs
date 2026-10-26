@@ -161,6 +161,14 @@ async function main() {
   console.log(`core: ${configured.connection.base_url}`);
   const state = await call(configured.connection, 'GET', '/api/state');
   console.log(`state: ${JSON.stringify(state).slice(0, 400)}`);
+  // The settings form asks this before anything is saved, which is the whole
+  // point of the override fields: the endpoint worth asking about is the one
+  // being typed, not the one already stored.
+  const models = await call(configured.connection, 'POST', '/api/models', {
+    base_url: `http://127.0.0.1:${PORT}/v1`,
+    api_key: 'probe-key'
+  });
+  console.log(`models from typed fields -> ${JSON.stringify(models).slice(0, 200)}`);
   const following = follow(
     configured.connection,
     (seen) => seen.some((event) => event.name === 'assistant_text'),
@@ -179,6 +187,11 @@ async function main() {
     LEXIQODE_CONFIG_DIR: path.join(process.env.TEMP || '/tmp', 'lx-probe-empty')
   });
   console.log(`state: ${JSON.stringify(await call(bare.connection, 'GET', '/api/state')).slice(0, 300)}`);
+  const bareModels = await call(bare.connection, 'POST', '/api/models', {
+    base_url: `http://127.0.0.1:${PORT}/v1`,
+    api_key: 'probe-key'
+  });
+  console.log(`models with no model configured -> ${JSON.stringify(bareModels).slice(0, 200)}`);
   try {
     console.log(`chat -> ${JSON.stringify(await call(bare.connection, 'POST', '/api/chat', { message: 'hi' }))}`);
   } catch (error) {

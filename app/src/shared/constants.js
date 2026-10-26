@@ -94,7 +94,7 @@ const CHANNELS = {
     showItem: 'shell:show-item'
   },
   /** Main-process to renderer: menu items and keyboard accelerators arrive here. */
-  app: { command: 'app:command' }
+  app: { command: 'app:command', i18n: 'app:i18n' }
 };
 
 /** Agent modes before the core has answered. The core is the authority. */
@@ -111,6 +111,11 @@ const DEFAULTS = {
   version: 1,
   appearance: {
     theme: 'system',
+    /**
+     * The window's language: 'system' follows the operating system, otherwise a
+     * dictionary code from `src/shared/i18n.*.json`.
+     */
+    language: 'system',
     fontSize: 13,
     tabSize: 2,
     wordWrap: 'off',
@@ -137,6 +142,13 @@ const DEFAULTS = {
     panel: 'terminal'
   },
   files: {
+    /**
+     * Whether the window reopens the folder it was last used with. Off by
+     * default: an editor that opens something on start makes the first thing a
+     * user sees a folder they did not choose, and the other behaviour is one
+     * setting away for anyone who wants it.
+     */
+    reopenLastFolder: false,
     exclude: [
       '**/.git/**',
       '**/node_modules/**',

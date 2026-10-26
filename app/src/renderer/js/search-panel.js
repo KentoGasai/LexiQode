@@ -8,6 +8,7 @@
  */
 
 import { clear, debounce, el } from './ui.js';
+import { t } from './i18n.js';
 
 export function createSearchPanel({ api, bus, onOpen, onNotice }) {
   const host = document.getElementById('sidebar-body');
@@ -29,7 +30,7 @@ export function createSearchPanel({ api, bus, onOpen, onNotice }) {
 
   const input = el('input', {
     type: 'text',
-    placeholder: 'Search across files',
+    placeholder: t('search.field'),
     spellcheck: 'false',
     oninput: () => {
       state.query = input.value;
@@ -42,7 +43,7 @@ export function createSearchPanel({ api, bus, onOpen, onNotice }) {
   });
   const includeInput = el('input', {
     type: 'text',
-    placeholder: 'files to include, e.g. src/**/*.js',
+    placeholder: t('search.include'),
     spellcheck: 'false',
     oninput: () => {
       state.include = includeInput.value;
@@ -50,12 +51,12 @@ export function createSearchPanel({ api, bus, onOpen, onNotice }) {
     }
   });
   const list = el('div');
-  const summary = el('div', { class: 'list__empty', text: 'Type to search. Results appear as they are found.' });
+  const summary = el('div', { class: 'list__empty', text: t('search.idle') });
 
   const options = [
-    { key: 'caseSensitive', label: 'Aa', title: 'Match case' },
-    { key: 'wholeWord', label: 'ab', title: 'Whole word' },
-    { key: 'regex', label: '.*', title: 'Regular expression' }
+    { key: 'caseSensitive', label: 'Aa', title: t('search.matchCase') },
+    { key: 'wholeWord', label: 'ab', title: t('search.wholeWord') },
+    { key: 'regex', label: '.*', title: t('search.regex') }
   ].map((option) =>
     el('button', {
       class: 'panel__tab',
@@ -88,10 +89,13 @@ export function createSearchPanel({ api, bus, onOpen, onNotice }) {
   }
 
   function progressText() {
-    if (!state.progress) return state.running ? 'searching…' : '';
+    if (!state.progress) return state.running ? t('search.running') : '';
     const { filesScanned, total, limitHit } = state.progress;
-    const parts = [`${total} match${total === 1 ? '' : 'es'}`, `${filesScanned} files`];
-    if (limitHit) parts.push('stopped at the result limit');
+    const parts = [
+      total === 1 ? t('search.matchesOne', { count: total }) : t('search.matches', { count: total }),
+      t('search.files', { count: filesScanned })
+    ];
+    if (limitHit) parts.push(t('search.limit'));
     return parts.join(' · ');
   }
 
@@ -163,7 +167,7 @@ export function createSearchPanel({ api, bus, onOpen, onNotice }) {
   function renderResults() {
     clear(list);
     if (!state.results.length) {
-      list.append(el('div', { class: 'list__empty', text: state.running ? 'Searching…' : 'No matches.' }));
+      list.append(el('div', { class: 'list__empty', text: state.running ? t('search.running') : t('search.none') }));
       return;
     }
     for (const [path, matches] of state.byFile) {
@@ -186,7 +190,7 @@ export function createSearchPanel({ api, bus, onOpen, onNotice }) {
         const after = match.text.slice(match.column - 1 + match.length);
         text.append(document.createTextNode(before), el('mark', { text: hit }), document.createTextNode(after));
         const row = el('div', { class: 'hit', title: `${path}:${match.line}` }, [
-          el('div', { class: 'hit__file', text: `line ${match.line}` }),
+          el('div', { class: 'hit__file', text: t('search.line', { line: match.line }) }),
           text,
           el('div', { class: 'hit__line', text: `:${match.line}` })
         ]);
@@ -196,14 +200,16 @@ export function createSearchPanel({ api, bus, onOpen, onNotice }) {
         body.append(row);
       }
       if (matches.length > 40) {
-        body.append(el('div', { class: 'list__empty', text: `… ${matches.length - 40} more on this file` }));
+        body.append(
+          el('div', { class: 'list__empty', text: t('search.more', { count: matches.length - 40 }) })
+        );
       }
       list.append(section);
     }
   }
 
   function mount() {
-    title.textContent = 'Search';
+    title.textContent = t('view.search');
     clear(actions);
     clear(host);
     host.append(fields, list);

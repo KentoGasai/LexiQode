@@ -96,6 +96,13 @@ class AgentService {
   /** Start the core if it is not running and attach the event stream. */
   async ensureStarted() {
     if (this.client) return this.describe();
+    // The core is created for one workspace: its tools resolve paths inside it
+    // and its transcript belongs to it. Starting one without a folder would make
+    // it work in whatever directory the window happened to be launched from.
+    if (!this.workspace.current()) {
+      this.#setStatus('stopped', 'no folder is open');
+      throw new CoreRequestError('no folder is open', { status: 0, reason: 'no-workspace' });
+    }
     this.#setStatus('starting', 'starting the agent');
     try {
       const connection = await this.process.start();
@@ -205,6 +212,18 @@ class AgentService {
     this.client = null;
     this.streamAbort = null;
     return this.process.stop();
+  }
+
+  /**
+   * Stop and start again, for a workspace that changed.
+   *
+   * A running core is bound to the folder it was started in, so switching
+   * folders has to replace it; keeping it would let the agent read and write the
+   * previous folder while the window shows a different one.
+   */
+  async restart() {
+    await this.stop().catch(() => {});
+    return this.ensureStarted();
   }
 }
 

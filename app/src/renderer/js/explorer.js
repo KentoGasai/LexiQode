@@ -10,6 +10,7 @@
  */
 
 import { clear, el, formatBytes, iconButton, toast } from './ui.js';
+import { t } from './i18n.js';
 
 const FILE_ICONS = [
   ['.js', 'js'], ['.mjs', 'js'], ['.cjs', 'js'], ['.ts', 'ts'], ['.tsx', 'ts'],
@@ -48,9 +49,10 @@ export function createExplorer({ api, onOpen, onNotice, activePath }) {
 
   async function refresh({ keepExpanded = true } = {}) {
     root = await api.workspace.current();
+    document.getElementById('sidebar-title').textContent = t('view.explorer');
     clear(host);
     if (!root) {
-      host.append(el('div', { class: 'list__empty', text: 'No folder is open. Use File ▸ Open Folder.' }));
+      host.append(el('div', { class: 'list__empty', text: t('explorer.noFolder') }));
       renderActions();
       return;
     }
@@ -65,10 +67,10 @@ export function createExplorer({ api, onOpen, onNotice, activePath }) {
     clear(actions);
     if (!root) return;
     actions.append(
-      iconButton('plus', 'New file', () => create('file')),
-      iconButton('plus', 'New folder', () => create('folder')),
-      iconButton('refresh', 'Refresh', () => refresh({ keepExpanded: true })),
-      iconButton('collapse', 'Collapse all', async () => {
+      iconButton('plus', t('explorer.newFile'), () => create('file')),
+      iconButton('plus', t('explorer.newFolder'), () => create('folder')),
+      iconButton('refresh', t('explorer.refresh'), () => refresh({ keepExpanded: true })),
+      iconButton('collapse', t('explorer.collapse'), async () => {
         expanded.clear();
         expanded.add('');
         await refresh();
@@ -85,7 +87,7 @@ export function createExplorer({ api, onOpen, onNotice, activePath }) {
       return;
     }
     if (!items.length && depth === 0) {
-      container.append(el('div', { class: 'list__empty', text: 'This folder is empty.' }));
+      container.append(el('div', { class: 'list__empty', text: t('explorer.empty') }));
       return;
     }
     for (const item of items) {
@@ -131,19 +133,29 @@ export function createExplorer({ api, onOpen, onNotice, activePath }) {
 
   async function handleContext(item) {
     const choices = item.directory
-      ? ['New file', 'New folder', 'Rename', 'Reveal in Explorer', 'Delete']
-      : ['Open', 'Rename', 'Reveal in Explorer', 'Delete'];
-    const answer = window.prompt(`${item.path}\n\n${choices.map((c, i) => `${i + 1}. ${c}`).join('\n')}`, '1');
+      ? [
+          { key: 'explorer.newFile', run: () => create('file', item.path) },
+          { key: 'explorer.newFolder', run: () => create('folder', item.path) },
+          { key: 'explorer.rename', run: () => rename(item.path, item.name) },
+          { key: 'explorer.reveal', run: () => api.workspace.reveal(item.path) },
+          { key: 'explorer.delete', run: () => remove(item.path) }
+        ]
+      : [
+          { key: 'explorer.open', run: () => onOpen(item.path) },
+          { key: 'explorer.rename', run: () => rename(item.path, item.name) },
+          { key: 'explorer.reveal', run: () => api.workspace.reveal(item.path) },
+          { key: 'explorer.delete', run: () => remove(item.path) }
+        ];
+    const answer = window.prompt(
+      `${t('explorer.chooseAction', { path: item.path })}\n\n${choices
+        .map((choice, index) => `${index + 1}. ${t(choice.key)}`)
+        .join('\n')}`,
+      '1'
+    );
     const index = Number(answer);
     if (!Number.isInteger(index) || index < 1 || index > choices.length) return;
-    const choice = choices[index - 1];
     try {
-      if (choice === 'Open') onOpen(item.path);
-      else if (choice === 'New file') await create('file', item.path);
-      else if (choice === 'New folder') await create('folder', item.path);
-      else if (choice === 'Rename') await rename(item.path, item.name);
-      else if (choice === 'Reveal in Explorer') await api.workspace.reveal(item.path);
-      else if (choice === 'Delete') await remove(item.path);
+      await choices[index - 1].run();
     } catch (error) {
       toast('error', error.message);
     }
@@ -151,7 +163,7 @@ export function createExplorer({ api, onOpen, onNotice, activePath }) {
 
   async function create(kind, parent = '') {
     const target = parent || (currentActive.includes('/') ? currentActive.slice(0, currentActive.lastIndexOf('/')) : '');
-    const name = window.prompt(kind === 'file' ? 'New file name' : 'New folder name', '');
+    const name = window.prompt(kind === 'file' ? t('explorer.newFileName') : t('explorer.newFolderName'), '');
     if (!name) return;
     try {
       const created = kind === 'file'
@@ -161,20 +173,20 @@ export function createExplorer({ api, onOpen, onNotice, activePath }) {
       expanded.add(created.path);
       await refresh();
       if (!created.directory) onOpen(created.path);
-      onNotice?.(`created ${created.path}`);
+      onNotice?.(t('explorer.created', { path: created.path }));
     } catch (error) {
       toast('error', error.message);
     }
   }
 
   async function rename(path, current) {
-    const name = window.prompt('Rename', current);
+    const name = window.prompt(t('explorer.renamePrompt'), current);
     if (!name || name === current) return;
     try {
       const result = await api.workspace.rename(path, name);
       invalidate();
       await refresh();
-      onNotice?.(`renamed to ${result.to}`);
+      onNotice?.(t('explorer.renamed', { path: result.to }));
     } catch (error) {
       toast('error', error.message);
     }
@@ -182,17 +194,17 @@ export function createExplorer({ api, onOpen, onNotice, activePath }) {
 
   async function remove(path) {
     const confirmed = await api.dialogs.confirm({
-      message: `Move ${path} to the recycle bin?`,
-      detail: 'The item can be restored from the recycle bin.',
+      message: t('explorer.deleteConfirm', { path }),
+      detail: t('explorer.deleteDetail'),
       danger: true,
-      confirmLabel: 'Move to bin'
+      confirmLabel: t('explorer.deleteAction')
     });
     if (!confirmed) return;
     try {
       await api.workspace.remove(path);
       invalidate();
       await refresh();
-      onNotice?.(`removed ${path}`);
+      onNotice?.(t('explorer.removed', { path }));
     } catch (error) {
       toast('error', error.message);
     }

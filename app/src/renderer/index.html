@@ -25,9 +25,12 @@
           <span class="titlebar__logo" id="brand">LexiQode</span>
           <nav class="titlebar__menus" id="menubar"></nav>
         </div>
-        <div class="titlebar__right">
-          <button class="chip" id="titlebar-agent" title="Agent status" type="button">agent: off</button>
-        </div>
+        <!--
+          Nothing on the right of the title bar: with a hidden title bar the
+          native window buttons are drawn there, and anything placed next to them
+          ends up underneath them. The agent's state is shown where it belongs,
+          in the assistant's own header and in the status bar.
+        -->
       </header>
 
       <div class="body">
@@ -35,7 +38,7 @@
 
         <aside class="sidebar" id="sidebar">
           <div class="pane__head">
-            <span class="pane__title" id="sidebar-title">Explorer</span>
+            <span class="pane__title" id="sidebar-title" data-i18n="view.explorer">Explorer</span>
             <div class="pane__actions" id="sidebar-actions"></div>
           </div>
           <div class="pane__body" id="sidebar-body"></div>
@@ -60,8 +63,9 @@
         <aside class="chat" id="chat">
           <div class="resizer resizer--v" id="chat-resizer" role="separator" aria-orientation="vertical"></div>
           <div class="pane__head">
-            <span class="pane__title">Assistant</span>
+            <span class="pane__title" data-i18n="chat.title">Assistant</span>
             <span class="dot" id="chat-dot" data-state="off"></span>
+            <span class="chat__state" id="chat-state" data-state="off"></span>
             <div class="pane__actions" id="chat-actions"></div>
           </div>
           <div class="transcript" id="transcript"></div>
@@ -71,14 +75,15 @@
               id="composer-input"
               class="composer__input"
               rows="1"
+              data-i18n-placeholder="chat.placeholder"
               placeholder="Ask, plan, debug or hand over a task…"
               spellcheck="false"
             ></textarea>
             <div class="composer__row">
               <div class="modes" id="composer-modes"></div>
               <div class="composer__spacer"></div>
-              <button class="btn btn--ghost" id="composer-stop" type="button" hidden>Stop</button>
-              <button class="btn btn--primary" id="composer-send" type="button">Send</button>
+              <button class="btn btn--ghost" id="composer-stop" type="button" data-i18n="chat.stop" hidden>Stop</button>
+              <button class="btn btn--primary" id="composer-send" type="button" data-i18n="chat.send">Send</button>
             </div>
           </div>
         </aside>

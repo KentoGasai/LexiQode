@@ -1,6 +1,0 @@
-{
-  // For the case where this folder is opened on its own instead of the
-  // repository root: point the editor at the TypeScript the build uses.
-  "typescript.tsdk": "node_modules/typescript/lib",
-  "typescript.enablePromptUseWorkspaceTsdk": true
-}

@@ -13,6 +13,7 @@ const { app, BrowserWindow, Menu, nativeTheme, shell, dialog } = require('electr
 const path = require('node:path');
 
 const { CHANNELS, PRODUCT } = require('../shared/constants');
+const { payloadFor } = require('../shared/i18n');
 const { assertAssetsPresent, handleRequests, registerScheme, urlFor } = require('./asset-protocol');
 const { registerIpc } = require('./ipc');
 const { rendererRoot, settingsFile, userDataDir, vendorRoot } = require('./paths');
@@ -33,17 +34,33 @@ let services = null;
 let quitting = false;
 let pendingFolder = null;
 
-/** A folder passed on the command line, ignoring Electron's own switches. */
+/**
+ * A folder named on the command line.
+ *
+ * Only an absolute path that exists and is not the application's own directory
+ * counts. The check is this strict because Electron is normally started as
+ * `electron .`, and `.` is a directory: treating it as the folder to open made
+ * the app open its own sources on every start.
+ */
 function folderFromArgv(argv) {
   const candidates = argv.slice(app.isPackaged ? 1 : 2).filter((value) => !value.startsWith('-'));
   for (const candidate of candidates) {
+    if (!path.isAbsolute(candidate)) continue;
     try {
-      if (require('node:fs').statSync(candidate).isDirectory()) return path.resolve(candidate);
+      const resolved = path.resolve(candidate);
+      if (!require('node:fs').statSync(resolved).isDirectory()) continue;
+      if (resolved === path.resolve(app.getAppPath())) continue;
+      return resolved;
     } catch {
       // Not a path this process can see; keep looking.
     }
   }
   return null;
+}
+
+/** The current language, resolved against the system locale. */
+function translations() {
+  return payloadFor(services?.settings.get().appearance.language, app.getLocale());
 }
 
 function buildServices() {
@@ -72,7 +89,16 @@ function buildServices() {
     onStatus: (payload) => send(CHANNELS.agent.statusChanged, payload)
   });
 
-  settings.onChange((value) => send(CHANNELS.settings.changed, value));
+  let lastLanguage = settings.get().appearance.language;
+  settings.onChange((value) => {
+    send(CHANNELS.settings.changed, value);
+    // The menu belongs to the main process, so a language change has to rebuild
+    // it here; everything else the window re-renders itself.
+    if (value.appearance.language !== lastLanguage) {
+      lastLanguage = value.appearance.language;
+      if (mainWindow) buildMenu();
+    }
+  });
   workspace.onChange((value) => send(CHANNELS.workspace.changed, value));
 
   services = { settings, workspace, search, git, terminal, agent, send };
@@ -82,6 +108,57 @@ function buildServices() {
 /** Commands the menu and the window's own shortcuts both end up in. */
 function sendCommand(name, argument) {
   services?.send(CHANNELS.app.command, { name, argument });
+}
+
+/**
+ * Menu labels, by the English label they are written as.
+ *
+ * Translating the built template rather than threading a lookup through every
+ * item keeps the menu readable as a menu, and a label with no entry stays as it
+ * was - which is what should happen to a role-based item Electron labels itself.
+ */
+const MENU_LABELS = {
+  File: 'menu.file',
+  Edit: 'menu.edit',
+  View: 'menu.view',
+  AI: 'menu.ai',
+  Help: 'menu.help',
+  'Open Folder…': 'menu.openFolder',
+  'Open File…': 'menu.openFile',
+  Save: 'menu.save',
+  'Save All': 'menu.saveAll',
+  'Close Editor': 'menu.closeEditor',
+  'Close Folder': 'menu.closeFolder',
+  Exit: 'menu.exit',
+  'Find in File': 'menu.findInFile',
+  'Find in Files': 'menu.findInFiles',
+  'Command Palette…': 'menu.palette',
+  'Go to File…': 'menu.gotoFile',
+  'Toggle Sidebar': 'menu.toggleSidebar',
+  'Toggle Panel': 'menu.togglePanel',
+  'Toggle AI Panel': 'menu.toggleAssistant',
+  Explorer: 'cmd.viewExplorer',
+  Search: 'cmd.viewSearch',
+  'Source Control': 'cmd.viewGit',
+  Terminal: 'cmd.viewTerminal',
+  'New Chat': 'menu.newChat',
+  'Cancel Turn': 'menu.cancelTurn',
+  'Focus Composer': 'menu.focusComposer',
+  'Agent Settings…': 'menu.agentSettings',
+  'Restart Agent': 'menu.restartAgent',
+  'About LexiQode': 'menu.about',
+  'Open Settings File': 'menu.settingsFile',
+  'Open Data Folder': 'menu.dataFolder'
+};
+
+function translateMenu(items, messages) {
+  return items.map((item) => {
+    const translated = { ...item };
+    const key = MENU_LABELS[item.label];
+    if (key && messages[key]) translated.label = messages[key];
+    if (Array.isArray(item.submenu)) translated.submenu = translateMenu(item.submenu, messages);
+    return translated;
+  });
 }
 
 function buildMenu() {
@@ -160,7 +237,7 @@ function buildMenu() {
       ]
     }
   ];
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+  Menu.setApplicationMenu(Menu.buildFromTemplate(translateMenu(template, translations().messages)));
 }
 
 function createWindow() {
@@ -198,6 +275,7 @@ function createWindow() {
   const { workspace, search, git, terminal, agent } = services;
   registerIpc({
     ipcMain: require('electron').ipcMain,
+    app,
     dialog,
     shell,
     settings,
@@ -254,11 +332,19 @@ if (!app.requestSingleInstanceLock()) {
     buildMenu();
     const { settings, workspace } = buildServices();
     const fromArgv = folderFromArgv(process.argv);
-    const restore = settings.get().session.folder;
-    const target = fromArgv || (restore && require('node:fs').existsSync(restore) ? restore : null);
+    // Reopening the last folder is a preference, not a default. Doing it always
+    // meant the first thing a user saw was a folder they had not chosen.
+    const sessionFolder = settings.get().session.folder;
+    const restore =
+      settings.get().files.reopenLastFolder && sessionFolder && require('node:fs').existsSync(sessionFolder)
+        ? sessionFolder
+        : null;
+    const target = fromArgv || restore;
     if (target) await workspace.open(target).catch(() => {});
     createWindow();
-    if (settings.get().agent.autoStart) {
+    // The core is created for one folder; without one it would run in whatever
+    // directory the window was launched from.
+    if (settings.get().agent.autoStart && workspace.current()) {
       void services.agent.ensureStarted().catch(() => {});
     }
   });
