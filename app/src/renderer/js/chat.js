@@ -104,6 +104,8 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
     tools: new Map(),
     approvals: new Map(),
     context: null,
+    /** The "the conversation is empty" line, while it is on screen. */
+    emptyState: null,
     settingsOpen: false,
     modeOpen: false
   };
@@ -127,13 +129,28 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
     return { node, body, who };
   }
 
+  /**
+   * Drop the empty-state line the moment the conversation stops being empty.
+   *
+   * It is drawn when a chat with no messages is loaded, and nothing removed it
+   * when the first message arrived: the transcript kept "the conversation is
+   * empty" above the answer it was already showing.
+   */
+  function clearEmptyState() {
+    if (!state.emptyState) return;
+    state.emptyState.remove();
+    state.emptyState = null;
+  }
+
   function addUser(text) {
+    clearEmptyState();
     const created = turn('user');
     created.body.textContent = text;
     return created;
   }
 
   function addAssistant() {
+    clearEmptyState();
     const created = turn('assistant');
     created.meta = el('div', { class: 'turn__meta' });
     created.node.append(created.meta);
@@ -354,6 +371,7 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
 
   /** A line in the transcript that is neither a message nor an error. */
   function addNotice(text) {
+    clearEmptyState();
     const node = el('div', { class: 'notice', text });
     transcript.append(node);
     state.current = null;
@@ -1313,9 +1331,11 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
       const snapshot = await api.agent.history();
       const messages = (snapshot && snapshot.messages) || [];
       if (!messages.length) {
-        transcript.append(el('div', { class: 'list__empty', text: t('chat.empty') }));
+        state.emptyState = el('div', { class: 'list__empty', text: t('chat.empty') });
+        transcript.append(state.emptyState);
         return;
       }
+      state.emptyState = null;
       for (const message of messages) {
         const text = stripContext(String(message.content || ''));
         if (!text.trim()) continue;

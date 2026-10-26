@@ -114,9 +114,14 @@ Copy-Item (Join-Path $app 'package.json') $appRoot -Force
 Copy-Item $core (Join-Path $bundle 'resources\core') -Recurse -Force
 
 # Python writes bytecode beside the sources unless told otherwise, and a
-# read-only install location is exactly where that fails.
-Get-ChildItem (Join-Path $bundle 'resources\core') -Recurse -Directory -Filter '__pycache__' |
-    Remove-Item -Recurse -Force
+# read-only install location is exactly where that fails. The test runner's
+# caches go too: they name the tests of the machine that built the archive, and
+# a published download should carry the product and nothing about the workshop.
+$coreRoot = Join-Path $bundle 'resources\core'
+foreach ($cache in '__pycache__', '.pytest_cache', '.ruff_cache', '.mypy_cache', '.venv', 'venv') {
+    Get-ChildItem $coreRoot -Recurse -Directory -Filter $cache -ErrorAction SilentlyContinue |
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+}
 
 $readme = @"
 LexiQode $version

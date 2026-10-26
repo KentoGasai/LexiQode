@@ -377,6 +377,8 @@ async function main() {
           : [],
         objectObjectInTurn: finalTurn ? finalTurn.textContent.includes('[object Object]') : null,
         transcriptNodes: document.getElementById('transcript').children.length,
+        // The empty-state line used to stay on screen above the first answer.
+        emptyStateShown: Boolean(document.querySelector('#transcript .list__empty')),
         contextMeter: meter ? meter.textContent.replace(/\\s+/g, ' ').trim() : '(missing)',
         contextMeterTitle: meter ? meter.title : ''
       };
