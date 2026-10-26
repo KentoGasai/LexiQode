@@ -25,7 +25,7 @@ you configure.
 | Search | find in files with streaming results and cancellation |
 | Source control | git: staged and unstaged separated, diffs, stage, unstage, discard, commit, branch switching |
 | Terminal | a real PowerShell session in the bottom panel, colours, working directory preserved |
-| Assistant | streaming answers, separately shown reasoning, tool calls with arguments and results, approvals, cancel, new conversation |
+| Assistant | streaming answers, reasoning folded into a "Thinking…" line above the answer, one line of tools per turn (arguments and results one click away), a context gauge and automatic compaction, approvals, cancel, new conversation |
 | Modes | Agent, Ask, Plan, Debug, Review - what the next message is allowed to do |
 | Interface | resizable and restorable layout, dark and light themes, Russian and English |
 
@@ -74,11 +74,23 @@ button in its header.
 | endpoint | base URL: `https://api.example.com/v1`, `http://127.0.0.1:11434/v1` |
 | api key | stored locally, sent only to that endpoint |
 | model | the model id; the list is filled in automatically |
+| context window | how many tokens the model accepts in one request (128 000 by default) |
+| max output | how many tokens one answer may occupy (8 192 by default) |
+| compact at, % | share of the window after which the oldest messages are replaced by a summary (75 by default) |
 
 The model list is requested as soon as the endpoint and the key are entered; there
 is nothing to save first. The request goes to `GET {endpoint}/models`, so the base
 URL has to be the one that makes that path correct. If the server is unreachable or
 the list is empty, the form shows why and offers to try again.
+
+Above the input the panel shows how much of the context is in use: `context 12 480 /
+128 000 · 10%`. Either the server reported that number or the core estimated it from
+the length of the conversation - the tooltip says which. When the conversation
+approaches the limit (75% of the window by default) the core asks the model to
+compress the oldest part and replaces it with a summary; a "Context compacted" line
+appears in the transcript. That summary is kept through later compactions, so
+decisions and paths are not lost; if the summary call fails, the old part is dropped
+with a note saying what was lost.
 
 The same settings can be configured without the graphical interface:
 
