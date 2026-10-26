@@ -170,11 +170,16 @@ function buildMenu() {
     {
       label: 'File',
       submenu: [
-        { label: 'Open Folder…', accelerator: 'CmdOrCtrl+K CmdOrCtrl+O', click: () => sendCommand('workspace.open') },
+        // No accelerator on these two: Electron accepts only one key per
+        // accelerator, so `CmdOrCtrl+K CmdOrCtrl+O` produced "Invalid
+        // accelerator token" and a menu item with no shortcut at all. The chord
+        // is implemented in the window instead (see `wireKeys`), and the palette
+        // is where the shortcut is advertised.
+        { label: 'Open Folder…', click: () => sendCommand('workspace.open') },
         { label: 'Open File…', accelerator: 'CmdOrCtrl+O', click: () => sendCommand('file.open') },
         { type: 'separator' },
         { label: 'Save', accelerator: 'CmdOrCtrl+S', click: () => sendCommand('file.save') },
-        { label: 'Save All', accelerator: 'CmdOrCtrl+K S', click: () => sendCommand('file.saveAll') },
+        { label: 'Save All', accelerator: 'CmdOrCtrl+Shift+S', click: () => sendCommand('file.saveAll') },
         { label: 'Close Editor', accelerator: 'CmdOrCtrl+W', click: () => sendCommand('file.close') },
         { type: 'separator' },
         { label: 'Close Folder', click: () => sendCommand('workspace.close') },

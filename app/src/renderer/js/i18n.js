@@ -59,3 +59,17 @@ export function applyStaticTranslations(root = document) {
     node.setAttribute('aria-label', t(node.dataset.i18nAria));
   }
 }
+
+/**
+ * Which dictionary key describes an agent state.
+ *
+ * The main process reports `stopped`, `starting`, `ready` and `error`; the
+ * dictionary has a word for each of those and `off` for anything else, so a
+ * state this window has not been taught still reads as a word rather than as a
+ * blank. Kept here because the status bar and the assistant's header say the
+ * same thing about the same agent, and two copies of this mapping is how they
+ * start disagreeing.
+ */
+export function agentStateKey(state) {
+  return ['ready', 'starting', 'error'].includes(state) ? state : 'off';
+}

@@ -23,6 +23,15 @@
       <header class="titlebar" id="titlebar">
         <div class="titlebar__drag">
           <span class="titlebar__logo" id="brand">LexiQode</span>
+          <!--
+            The open folder, in the title bar, as a button.
+
+            It is the one thing a user needs constantly and the window had no
+            visible way to do it: the menu is inside the native title bar area,
+            so the only routes were a status bar item and a keyboard chord. This
+            shows which folder is open and opens another one on a click.
+          -->
+          <button class="titlebar__folder" id="titlebar-folder" type="button"></button>
           <nav class="titlebar__menus" id="menubar"></nav>
         </div>
         <!--

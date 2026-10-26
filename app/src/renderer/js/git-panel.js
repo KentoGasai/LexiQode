@@ -14,7 +14,7 @@
 import { clear, el, iconButton, toast } from './ui.js';
 import { t } from './i18n.js';
 
-export function createGitPanel({ api, onOpenDiff, onNotice }) {
+export function createGitPanel({ api, onOpenDiff, onNotice, onOpenFolder }) {
   const host = document.getElementById('sidebar-body');
   const title = document.getElementById('sidebar-title');
   const actions = document.getElementById('sidebar-actions');
@@ -136,6 +136,26 @@ export function createGitPanel({ api, onOpenDiff, onNotice }) {
     return section;
   }
 
+  /**
+   * What the panel shows when there is no folder to read a repository from.
+   *
+   * git is asked inside the open folder, so with none open its own answer is a
+   * sentence in English. The panel says it in the window's language and offers
+   * the action that makes the panel work, instead of leaving the previous view
+   * on screen as if the button had not been pressed.
+   */
+  function needsFolder() {
+    return el('div', { class: 'list__empty list__empty--action' }, [
+      el('div', { text: t('git.needsFolder') }),
+      el('button', {
+        class: 'btn btn--primary',
+        type: 'button',
+        text: t('view.openFolder'),
+        onclick: () => onOpenFolder?.()
+      })
+    ]);
+  }
+
   async function refresh() {
     if (!host.isConnected) return;
     clear(host);
@@ -146,9 +166,10 @@ export function createGitPanel({ api, onOpenDiff, onNotice }) {
       return;
     }
     if (!status.repo) {
-      host.append(
-        el('div', { class: 'list__empty', text: status.reason || t('git.noRepo') })
-      );
+      const reason = status.reason || '';
+      // "no folder is open" is the core's phrasing for a state the window has a
+      // better answer to; anything else git said is passed through as it is.
+      host.append(/no folder/i.test(reason) ? needsFolder() : el('div', { class: 'list__empty', text: reason || t('git.noRepo') }));
       return;
     }
     commits = [];

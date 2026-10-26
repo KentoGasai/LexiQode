@@ -21,11 +21,14 @@ const BATCH_FILES = 25;
 const BATCH_INTERVAL_MS = 40;
 
 class SearchService {
-  constructor({ workspace, settings, onBatch, onDone }) {
+  constructor({ workspace, settings, onBatch, onDone, batchIntervalMs = BATCH_INTERVAL_MS }) {
     this.workspace = workspace;
     this.settings = settings;
     this.onBatch = onBatch;
     this.onDone = onDone;
+    // How often a progress report may be sent. A parameter so a test can ask for
+    // one per file instead of waiting on a clock.
+    this.batchIntervalMs = batchIntervalMs;
     this.cancelled = new Set();
   }
 
@@ -152,7 +155,13 @@ class SearchService {
             this.onDone({ searchId, ...state, cancelled: false });
             return;
           }
-          if (batch.length >= 200 || Date.now() - lastFlush > BATCH_INTERVAL_MS) flush();
+          // Progress is reported even when nothing has matched yet. `flush`
+          // sends nothing for an empty batch unless it is forced, so a search
+          // that walks tens of thousands of unrelated files before its first hit
+          // used to show nothing at all - no counter, no sign of life - and the
+          // panel looked frozen while the main process was working hard.
+          if (batch.length >= 200) flush();
+          else if (Date.now() - lastFlush >= this.batchIntervalMs) flush(true);
         }
       }
       flush(true);

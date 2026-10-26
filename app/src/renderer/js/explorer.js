@@ -47,8 +47,29 @@ export function createExplorer({ api, onOpen, onNotice, activePath }) {
     return items;
   }
 
-  async function refresh({ keepExpanded = true } = {}) {
-    root = await api.workspace.current();
+  /**
+   * Draw the tree.
+   *
+   * `force` re-reads what is on screen instead of trusting the cache. It is what
+   * a user asking for a refresh means, and it matters because this tree is not
+   * the only thing that writes: the agent edits files through the core, a shell
+   * command in the terminal creates them, and neither goes through this module -
+   * so its own writes cannot be the only trigger for a re-read.
+   */
+  async function refresh({ keepExpanded = true, force = false } = {}) {
+    const next = await api.workspace.current();
+    // A cache of one folder's children is worthless for another folder, and
+    // this is the only place that notices the difference: the tree was drawn
+    // from the previous folder's cached listing after a folder switch, so
+    // opening a repository showed whatever had been open before it.
+    if (force || (next ? next.root : null) !== (root ? root.root : null)) {
+      invalidate();
+      if ((next ? next.root : null) !== (root ? root.root : null) || !keepExpanded) {
+        expanded.clear();
+        expanded.add('');
+      }
+    }
+    root = next;
     document.getElementById('sidebar-title').textContent = t('view.explorer');
     clear(host);
     if (!root) {
@@ -69,7 +90,7 @@ export function createExplorer({ api, onOpen, onNotice, activePath }) {
     actions.append(
       iconButton('plus', t('explorer.newFile'), () => create('file')),
       iconButton('plus', t('explorer.newFolder'), () => create('folder')),
-      iconButton('refresh', t('explorer.refresh'), () => refresh({ keepExpanded: true })),
+      iconButton('refresh', t('explorer.refresh'), () => refresh({ force: true })),
       iconButton('collapse', t('explorer.collapse'), async () => {
         expanded.clear();
         expanded.add('');

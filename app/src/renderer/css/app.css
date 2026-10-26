@@ -114,6 +114,36 @@ textarea {
   flex: 0 0 auto;
 }
 
+.titlebar__folder {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 420px;
+  height: 22px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  -webkit-app-region: no-drag;
+}
+
+.titlebar__folder:hover {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.titlebar__folder[data-empty="true"] {
+  color: var(--accent);
+}
+
 .titlebar__menus {
   display: flex;
   gap: 2px;
@@ -705,6 +735,19 @@ kbd {
   padding: 14px;
   color: var(--text-faint);
   font-size: 12px;
+}
+
+/* An empty state that explains itself and offers the way out of it: the
+   sentence, then the one button that fixes it. */
+.list__empty--action {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.list__empty--action .btn {
+  flex: 0 0 auto;
 }
 
 /* ----------------------------------------------------------------- search */
@@ -1410,6 +1453,21 @@ kbd {
 
 .statusbar__item[data-clickable="true"]:hover {
   color: var(--text);
+}
+
+/* A model id is long - `gpt://folder/name/version` - and the status bar has one
+   line, so it is truncated rather than allowed to push the cursor position off
+   the edge. The whole id stays in the tooltip. */
+.statusbar__item[data-role="model"] {
+  max-width: 340px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.statusbar__item[data-missing="true"] {
+  color: var(--warn, var(--text-faint));
 }
 
 .statusbar__spacer {

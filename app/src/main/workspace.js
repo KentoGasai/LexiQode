@@ -25,11 +25,40 @@ const {
 const { SKIP_ALWAYS, isExcluded } = require('../shared/exclude');
 
 class WorkspaceService {
-  constructor({ settings, onChange = () => {} }) {
+  constructor({ settings }) {
     this.settings = settings;
-    this.onChange = onChange;
     this.root = '';
     this._index = null;
+    this.listeners = new Set();
+  }
+
+  /**
+   * Subscribe to folder changes; returns the unsubscribe function.
+   *
+   * Listeners rather than one callback assigned through the constructor, and
+   * named exactly as `SettingsStore` names it, because the main process
+   * registers this the same way it registers the settings listener. An earlier
+   * version kept the callback in a property called `onChange`, so the line that
+   * looked like a subscription (`workspace.onChange(fn)`) called the default
+   * no-op instead of registering anything: the window was never told that a
+   * folder had opened, and every panel went on showing the previous state while
+   * the folder itself was open in this process.
+   */
+  onChange(listener) {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  #notify() {
+    const value = this.current();
+    for (const listener of this.listeners) {
+      try {
+        listener(value);
+      } catch {
+        // One listener that throws must not stop the others, and it must never
+        // break the folder switch that has already happened.
+      }
+    }
   }
 
   /** The open folder, or a refusal. Every operation starts here. */
@@ -48,14 +77,14 @@ class WorkspaceService {
     if (!info.isDirectory()) throw new Error(`${resolved} is not a folder`);
     this.root = resolved;
     this._index = null;
-    this.onChange(this.current());
+    this.#notify();
     return this.current();
   }
 
   close() {
     this.root = '';
     this._index = null;
-    this.onChange(null);
+    this.#notify();
   }
 
   excludes() {

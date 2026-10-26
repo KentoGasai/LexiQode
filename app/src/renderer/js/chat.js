@@ -19,7 +19,7 @@
 
 import { clear, debounce, el, icon, toast } from './ui.js';
 import { renderMarkdown, toPlainText } from './markdown.js';
-import { current as i18nInfo, t } from './i18n.js';
+import { agentStateKey, current as i18nInfo, t } from './i18n.js';
 
 /**
  * The five modes, by id: an icon and the two keys that name them.
@@ -52,7 +52,7 @@ function knownModes() {
   return Object.keys(MODE_INFO).map((id) => ({ id, label: modeLabel(id), hint: modeHint(id) }));
 }
 
-export function createChat({ api, bus, settings, onNotice, editor }) {
+export function createChat({ api, bus, settings, onNotice, editor, onProfile }) {
   const transcript = document.getElementById('transcript');
   const input = document.getElementById('composer-input');
   const sendButton = document.getElementById('composer-send');
@@ -220,9 +220,8 @@ export function createChat({ api, bus, settings, onNotice, editor }) {
 
   function applyStatus(status) {
     state.agent = status || { state: 'stopped', detail: '' };
-    const known = ['ready', 'starting', 'error'];
-    const key = known.includes(state.agent.state) ? state.agent.state : 'off';
-    dot.dataset.state = known.includes(state.agent.state) ? state.agent.state : 'off';
+    const key = agentStateKey(state.agent.state);
+    dot.dataset.state = key;
     dot.title = state.agent.detail || t(`agent.${key}`);
     if (stateLabel) {
       stateLabel.textContent = t(`agent.${key}`);
@@ -232,6 +231,17 @@ export function createChat({ api, bus, settings, onNotice, editor }) {
     if (state.agent.state !== 'ready') {
       state.running = false;
       renderRunning();
+    }
+  }
+
+  /** Read the main process's own view of the agent and show it. */
+  async function refreshStatus() {
+    try {
+      applyStatus(await api.agent.status());
+    } catch {
+      // The status call is the one thing that cannot fail into an error card:
+      // the panel keeps whatever it last knew, and the next transition replaces
+      // it.
     }
   }
 
@@ -549,6 +559,11 @@ export function createChat({ api, bus, settings, onNotice, editor }) {
         apiKey.value = '';
         status.textContent = t('settings.saved');
         if (!quiet) onNotice?.(t('settings.savedNotice'), 'ok');
+        // Saving is what makes a configured assistant usable, so the core is
+        // brought up here rather than left for the first message: the settings
+        // only reach it when it starts, and a panel that says "выключен" after a
+        // successful save is telling the user their save did not work.
+        await startAgent(status);
         await loadState();
         return true;
       } catch (error) {
@@ -556,6 +571,27 @@ export function createChat({ api, bus, settings, onNotice, editor }) {
         toast('error', error.message);
         return false;
       }
+    }
+
+    /**
+     * Start the core and say where it got to.
+     *
+     * The one refusal worth translating is the one a user can act on: the core
+     * works inside a folder, and with none open it says so in English only.
+     */
+    async function startAgent(statusNode) {
+      try {
+        applyStatus(await api.agent.start());
+      } catch (error) {
+        await refreshStatus();
+        const message = /no folder/i.test(error.message) ? t('chat.needsFolder') : error.message;
+        if (statusNode) statusNode.textContent = message;
+        return false;
+      }
+      // applyStatus above came from the agent's own answer; the panel's status
+      // line confirms the model that is now in force.
+      if (statusNode) statusNode.textContent = t('settings.savedAndReady');
+      return true;
     }
 
     /**
@@ -606,12 +642,16 @@ export function createChat({ api, bus, settings, onNotice, editor }) {
         const picker = el('select', {
           class: 'modelpick',
           title: t('settings.useModel'),
-          onchange: () => {
-            if (picker.value) {
-              model.value = picker.value;
-              // Choosing from the list is not a reason to ask again.
-              scanned = `${id.value.trim()}|${baseUrl.value.trim()}|${apiKey.value.trim()}`;
-            }
+          onchange: async () => {
+            if (!picker.value) return;
+            model.value = picker.value;
+            // Choosing from the list is not a reason to ask again.
+            scanned = `${id.value.trim()}|${baseUrl.value.trim()}|${apiKey.value.trim()}`;
+            // The choice is the decision, so it is saved here rather than left
+            // waiting for a Save press the user has no reason to expect: picking
+            // a different model and finding the old one still in force reads as a
+            // list that does not work.
+            await save({ quiet: true });
           }
         });
         picker.append(el('option', { value: '', text: t('settings.model') }));
@@ -707,6 +747,10 @@ export function createChat({ api, bus, settings, onNotice, editor }) {
     try {
       const snapshot = await api.agent.state();
       state.profile = snapshot.profile || {};
+      // The status bar shows the model the core is actually configured with, and
+      // this is the only place that knows it: it used to say "no model chosen"
+      // forever, whatever had been saved.
+      onProfile?.(state.profile);
       state.agentSettings = snapshot.agent || {};
       if (Array.isArray(snapshot.modes) && snapshot.modes.length) {
         state.modes = snapshot.modes.map((mode) => ({
@@ -776,6 +820,30 @@ export function createChat({ api, bus, settings, onNotice, editor }) {
     if (state.modeOpen) toggleModeList(false);
   });
 
+  /**
+   * Follow every agent transition the main process reports.
+   *
+   * Reading the status once, when the panel was built, is why a window that was
+   * opened before a folder was chosen went on saying "выключен" while the agent
+   * behind it was already connected and answering: nothing told the panel that
+   * anything had changed.
+   */
+  bus.on('agent:status-changed', (payload) => applyStatus(payload));
+
+  /**
+   * And follow the turn itself.
+   *
+   * This subscription is the whole reason the panel can show an answer. The main
+   * process emits every event the core produces on this channel; without a
+   * listener the panel sent a message and then displayed nothing at all - no
+   * streaming text, no tool cards, no approval prompt and not even the error
+   * that would have explained why - which is exactly what an assistant that does
+   * not answer looks like.
+   */
+  bus.on('agent:event', (payload) => {
+    if (payload && payload.name) handleEvent(payload);
+  });
+
   async function mount() {
     clear(actions);
     actions.append(
@@ -825,6 +893,7 @@ export function createChat({ api, bus, settings, onNotice, editor }) {
     state.approvals.clear();
     state.modeOpen = false;
     hideModePopup();
+    await refreshStatus();
     await loadState();
     await loadHistory();
     renderContext();

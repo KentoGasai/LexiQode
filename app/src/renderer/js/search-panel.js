@@ -10,7 +10,7 @@
 import { clear, debounce, el } from './ui.js';
 import { t } from './i18n.js';
 
-export function createSearchPanel({ api, bus, onOpen, onNotice }) {
+export function createSearchPanel({ api, bus, onOpen, onNotice, onOpenFolder }) {
   const host = document.getElementById('sidebar-body');
   const title = document.getElementById('sidebar-title');
   const actions = document.getElementById('sidebar-actions');
@@ -208,10 +208,36 @@ export function createSearchPanel({ api, bus, onOpen, onNotice }) {
     }
   }
 
-  function mount() {
+  /**
+   * What a view shows when there is no folder to work in.
+   *
+   * The core refuses to search outside a folder. Without this the view fell back
+   * to the explorer, so pressing Search looked like a dead button: the sidebar
+   * kept showing the file tree and nothing said why. One sentence and the one
+   * button that fixes it is the honest answer.
+   */
+  function needsFolder(messageKey) {
+    return el('div', { class: 'list__empty list__empty--action' }, [
+      el('div', { text: t(messageKey) }),
+      el('button', {
+        class: 'btn btn--primary',
+        type: 'button',
+        text: t('view.openFolder'),
+        onclick: () => onOpenFolder?.()
+      })
+    ]);
+  }
+
+  async function mount() {
     title.textContent = t('view.search');
     clear(actions);
     clear(host);
+    const root = await api.workspace.current().catch(() => null);
+    if (!root) {
+      cancel();
+      host.append(needsFolder('search.needsFolder'));
+      return;
+    }
     host.append(fields, list);
     list.append(summary);
     renderProgress();

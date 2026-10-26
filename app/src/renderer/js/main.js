@@ -17,7 +17,8 @@ import { createGitPanel } from './git-panel.js';
 import { createTerminalPanel } from './terminal-panel.js';
 import { createChat } from './chat.js';
 import { rank } from './fuzzy.js';
-import { current as i18nInfo, initI18n, t } from './i18n.js';
+import { nextSize } from './split.js';
+import { agentStateKey, current as i18nInfo, initI18n, t } from './i18n.js';
 
 const api = window.lexiqode;
 const bus = createBus();
@@ -142,18 +143,43 @@ function selectActivity(id) {
   void mountActivity();
 }
 
-async function mountActivity() {
-  if (workspace && currentActivity === 'search') {
-    search.mount();
+/**
+ * Draw the sidebar view that is currently selected.
+ *
+ * Draws are queued rather than run as they are asked for. A view clears the
+ * sidebar and then rebuilds it, both after an await, so two overlapping draws
+ * can interleave: a draw started during boot once landed after the draw a click
+ * had started, and the sidebar ended up showing the explorer's message with the
+ * search panel's contents appended to it. One chain means the draw that was
+ * asked for last is the one that finishes last.
+ */
+let activityDraw = Promise.resolve();
+
+function mountActivity() {
+  const next = activityDraw.then(() => drawActivity(), () => drawActivity());
+  // The queue must not carry a rejection forward into every later draw.
+  activityDraw = next.catch(() => {});
+  return next;
+}
+
+async function drawActivity() {
+  // Each view decides what to show with no folder open, and each of them says
+  // something useful: the search and repository views explain that they work
+  // inside a folder and offer to open one. Falling back to the explorer here
+  // instead - which is what this used to do - left the file tree on screen when
+  // the user pressed Search or Source control, so both buttons looked dead.
+  if (currentActivity === 'search') {
+    await search.mount();
     return;
   }
-  if (workspace && currentActivity === 'git') {
+  if (currentActivity === 'git') {
     git.mount();
     return;
   }
-  // Without a folder the explorer is what explains that, whichever view was
-  // selected before the folder was closed.
-  await explorer.refresh();
+  // Forced: switching to the explorer is a request to see the folder as it is
+  // now, and the files that appeared since the last look were written by the
+  // agent, by a command in the terminal, or by something outside this window.
+  await explorer.refresh({ force: true });
 }
 
 function toggleSidebar() {
@@ -188,13 +214,15 @@ function statusItem(text, options = {}) {
     class: 'statusbar__item',
     type: 'button',
     title: options.title || '',
-    dataset: { clickable: String(Boolean(options.onclick)) },
+    dataset: { clickable: String(Boolean(options.onclick)), role: options.role || '' },
     text,
     onclick: options.onclick
   });
 }
 
 let statusNodes = {};
+/** The last profile the assistant reported, so a redrawn status bar keeps it. */
+let modelProfile = null;
 
 function renderStatusbar() {
   dom.statusbar.replaceChildren();
@@ -215,6 +243,7 @@ function renderStatusbar() {
     }),
     model: statusItem(t('status.noModel'), {
       title: t('cmd.agentSettings'),
+      role: 'model',
       onclick: () => chat.toggleSettings(true)
     }),
     cursor: statusItem('', { title: t('status.cursor', { line: '—', column: '—' }) })
@@ -229,6 +258,9 @@ function renderStatusbar() {
     statusNodes.cursor
   );
   updateCursor();
+  // The bar is rebuilt from scratch on a workspace change, so the model and the
+  // agent state are put back from what was last reported rather than reset.
+  renderModelStatus(modelProfile);
 }
 
 function updateCursor() {
@@ -238,6 +270,23 @@ function updateCursor() {
   const position = t('status.cursor', { line: cursorInfo.line, column: cursorInfo.column });
   const lines = cursorInfo.lines ? ` · ${t('status.lines', { count: cursorInfo.lines })}` : '';
   statusNodes.cursor.textContent = `${language} · ${position}${lines}`;
+}
+
+/**
+ * What the model item in the status bar says.
+ *
+ * It was drawn once with the words "no model chosen" and never touched again, so
+ * it said that after a model had been saved, after the assistant had answered
+ * with it, and while the same window showed the model in the settings form. The
+ * plugin is told by the assistant panel, which is what talks to the core.
+ */
+function renderModelStatus(profile) {
+  modelProfile = profile && statusNodes.model ? profile : modelProfile;
+  if (!statusNodes.model) return;
+  const model = profile && profile.model ? String(profile.model) : '';
+  statusNodes.model.textContent = model ? t('status.model', { model }) : t('status.noModel');
+  statusNodes.model.title = model ? `${t('cmd.agentSettings')}\n${model}` : t('cmd.agentSettings');
+  statusNodes.model.dataset.missing = String(!model);
 }
 
 async function refreshGit({ mount = false } = {}) {
@@ -264,7 +313,7 @@ const COMMANDS = [
   { id: 'workspace.close', key: 'cmd.closeFolder' },
   { id: 'file.open', key: 'cmd.openFile', hint: 'Ctrl+O' },
   { id: 'file.save', key: 'cmd.save', hint: 'Ctrl+S' },
-  { id: 'file.saveAll', key: 'cmd.saveAll' },
+  { id: 'file.saveAll', key: 'cmd.saveAll', hint: 'Ctrl+K S' },
   { id: 'file.close', key: 'cmd.closeEditor', hint: 'Ctrl+W' },
   { id: 'editor.find', key: 'cmd.findInFile', hint: 'Ctrl+F' },
   { id: 'search.open', key: 'cmd.findInFiles', hint: 'Ctrl+Shift+F' },
@@ -355,15 +404,23 @@ function choosePalette() {
 // --------------------------------------------------------------- commands
 
 async function openFolder() {
-  const folder = await api.dialogs.openFolder();
-  if (folder) await api.workspace.open(folder);
+  try {
+    const folder = await api.dialogs.openFolder();
+    if (!folder) return;
+    await api.workspace.open(folder);
+  } catch (error) {
+    // A folder that cannot be opened has to say so: this call used to swallow
+    // the refusal, so choosing a folder that the path guard rejected looked
+    // exactly like the button doing nothing.
+    toast('error', error.message);
+  }
 }
 
 async function restartAgent() {
   try {
     await api.agent.stop();
     await api.agent.start();
-    toast('ok', 'the agent was restarted');
+    toast('ok', t('toast.agentRestarted'));
   } catch (error) {
     toast('error', error.message);
   }
@@ -373,6 +430,20 @@ function updateTitle() {
   const name = workspace ? workspace.name : t('status.noFolder');
   document.title = `${t('app.name')} — ${name}`;
   if (dom.brand) dom.brand.textContent = t('app.name');
+  renderFolderButton();
+}
+
+/**
+ * The folder button in the title bar: which folder is open, and the way to
+ * change it.
+ */
+function renderFolderButton() {
+  const button = document.getElementById('titlebar-folder');
+  if (!button) return;
+  const open = Boolean(workspace);
+  button.textContent = open ? workspace.name : t('welcome.open');
+  button.title = open ? `${workspace.root}\n${t('cmd.openFolder')}` : t('welcome.open');
+  button.dataset.empty = String(!open);
 }
 
 /**
@@ -541,25 +612,41 @@ function state_agentSummary() {
  * The width is written to the CSS variable while dragging, which is one style
  * recalculation per move instead of a layout pass per event, and the settings
  * file is written once when the drag ends rather than on every pixel.
+ *
+ * `invert` is for a boundary that is anchored on the far side of its panel: the
+ * chat sits against the right edge and the panel against the bottom, so moving
+ * their handles towards the middle of the window *grows* them while the raw
+ * pointer delta is negative. Adding the delta there shrank the panel the user
+ * was trying to enlarge, which is the one thing a resizer must never do.
  */
-function wireResizer(handle, { axis, target, variable, min, max, patchKey }) {
+function wireResizer(handle, { axis, target, variable, min, max, patchKey, invert = false }) {
   if (!handle) return;
   let dragging = false;
   let start = 0;
   let origin = 0;
+  const size = (delta, measured) =>
+    nextSize({ origin: measured, delta, invert, min, max });
 
   handle.addEventListener('pointerdown', (event) => {
     dragging = true;
     start = axis === 'x' ? event.clientX : event.clientY;
     origin = axis === 'x' ? target.getBoundingClientRect().width : target.getBoundingClientRect().height;
     handle.dataset.active = 'true';
-    handle.setPointerCapture(event.pointerId);
+    // Capture is what keeps the drag alive while the pointer is away from the
+    // two-pixel handle, but it can refuse - and a refusal must not stop a drag
+    // the user has already started.
+    try {
+      handle.setPointerCapture(event.pointerId);
+    } catch {
+      // Without capture the boundary still follows the pointer while it is over
+      // the handle, which is better than not following it at all.
+    }
     event.preventDefault();
   });
   handle.addEventListener('pointermove', (event) => {
     if (!dragging) return;
     const delta = (axis === 'x' ? event.clientX : event.clientY) - start;
-    const next = Math.min(max, Math.max(min, Math.round(origin + delta)));
+    const next = size(delta, origin);
     dom.root.style.setProperty(variable, `${next}px`);
   });
   const finish = (event) => {
@@ -568,7 +655,7 @@ function wireResizer(handle, { axis, target, variable, min, max, patchKey }) {
     handle.dataset.active = 'false';
     const rect = target.getBoundingClientRect();
     const measured = axis === 'x' ? rect.width : rect.height;
-    const next = Math.min(max, Math.max(min, Math.round(measured)));
+    const next = size(0, measured);
     settingsValue.layout[patchKey] = next;
     persist({ layout: { [patchKey]: next } });
   };
@@ -591,7 +678,8 @@ function wireLayout() {
     variable: '--chat-width',
     min: 260,
     max: 1400,
-    patchKey: 'chatWidth'
+    patchKey: 'chatWidth',
+    invert: true
   });
   wireResizer(document.getElementById('panel-resizer'), {
     axis: 'y',
@@ -599,24 +687,61 @@ function wireLayout() {
     variable: '--panel-height',
     min: 60,
     max: 900,
-    patchKey: 'panelHeight'
+    patchKey: 'panelHeight',
+    invert: true
   });
+
+  // The folder button in the title bar: open a folder, or switch to another.
+  document.getElementById('titlebar-folder')?.addEventListener('click', () => void openFolder());
 }
 
 // ------------------------------------------------------------------ keys
 
 function wireKeys() {
+  /**
+   * Two-key chords, the way VS Code has them.
+   *
+   * Electron cannot express these as a menu accelerator - given
+   * `CmdOrCtrl+K CmdOrCtrl+O` it logs "Invalid accelerator token: K CmdOrCtrl"
+   * and the menu item quietly has no shortcut at all, so the shortcut the
+   * palette advertises did nothing. The window implements the chord itself: the
+   * first key arms it, a second key within two seconds completes it.
+   */
+  let chordArmed = false;
+  let chordTimer = 0;
+  const clearChord = () => {
+    chordArmed = false;
+    clearTimeout(chordTimer);
+  };
+
   document.addEventListener('keydown', (event) => {
     const mod = event.ctrlKey || event.metaKey;
     if (event.key === 'Escape') {
+      clearChord();
       if (palette.open) {
         closePalette();
         event.preventDefault();
       }
       return;
     }
-    if (!mod) return;
+    if (!mod) {
+      clearChord();
+      return;
+    }
     const key = event.key.toLowerCase();
+    if (chordArmed) {
+      clearChord();
+      event.preventDefault();
+      if (key === 'o') void openFolder();
+      else if (key === 's') void editor.saveAll();
+      return;
+    }
+    if (key === 'k' && !event.shiftKey) {
+      chordArmed = true;
+      chordTimer = setTimeout(clearChord, 2000);
+      event.preventDefault();
+      return;
+    }
     if (key === 'p' && !event.shiftKey) {
       event.preventDefault();
       openPalette('files');
@@ -722,12 +847,21 @@ function wireEvents() {
   api.on(CH.searchDone, (payload) => bus.emit('search:done', payload));
   api.on(CH.terminalData, (payload) => bus.emit('terminal:data', payload));
   api.on(CH.terminalExit, (payload) => bus.emit('terminal:exit', payload));
-  api.on(CH.agentEvent, (payload) => bus.emit('agent:event', payload));
+  api.on(CH.agentEvent, (payload) => {
+    bus.emit('agent:event', payload);
+    // A finished turn is when the agent may have written files, and none of
+    // those writes pass through the explorer's own bookkeeping, so its cache is
+    // dropped and the next look at the tree re-reads it.
+    if (payload && payload.name === 'turn_end') explorer?.invalidate();
+  });
   api.on(CH.agentStatus, (payload) => {
     bus.emit('agent:status-changed', payload);
     if (statusNodes.agent && payload) {
-      statusNodes.agent.textContent = `agent: ${payload.state}`;
-      statusNodes.agent.title = payload.detail || '';
+      // The state arrives in English from the main process; the status bar has
+      // to say it in the window's language, the same way the assistant's own
+      // header does, or the two disagree about the same agent.
+      statusNodes.agent.textContent = t('status.agent', { state: t(`agent.${agentStateKey(payload.state)}`) });
+      statusNodes.agent.title = payload.detail || t('status.agentTitle');
     }
   });
   api.on(CH.windowState, () => {
@@ -768,12 +902,14 @@ async function boot() {
     api,
     bus,
     onOpen: (path, options) => void editor.open(path, options),
-    onNotice: (message, kind) => toast(kind || 'info', message)
+    onNotice: (message, kind) => toast(kind || 'info', message),
+    onOpenFolder: () => void openFolder()
   });
   git = createGitPanel({
     api,
     onOpenDiff: (path, options) => void editor.openDiff(path, options),
-    onNotice: (message, kind) => toast(kind || 'info', message)
+    onNotice: (message, kind) => toast(kind || 'info', message),
+    onOpenFolder: () => void openFolder()
   });
   terminal = createTerminalPanel({
     api,
@@ -786,7 +922,8 @@ async function boot() {
     bus,
     settings,
     editor,
-    onNotice: (message, kind) => toast(kind || 'info', message)
+    onNotice: (message, kind) => toast(kind || 'info', message),
+    onProfile: (profile) => renderModelStatus(profile)
   });
 
   wireLayout();
