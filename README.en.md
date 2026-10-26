@@ -224,7 +224,7 @@ Publishing a build is a matter of attaching the archive to a GitHub release:
 gh release create v0.2.0 `
   dist\LexiQode-0.2.0-win32-x64.zip `
   dist\LexiQode-0.2.0-win32-x64.zip.sha256 `
-  --title "LexiQode 0.2.0" --notes-file CHANGELOG.md
+  --title "LexiQode 0.2.0" --notes-file docs\release-notes\v0.2.0.md
 ```
 
 ## Tests

@@ -164,8 +164,12 @@ stages `dist\LexiQode-<version>-win32-x64`, and writes the archive plus its
 gh release create v0.2.0 `
   dist\LexiQode-0.2.0-win32-x64.zip `
   dist\LexiQode-0.2.0-win32-x64.zip.sha256 `
-  --title "LexiQode 0.2.0" --notes-file CHANGELOG.md
+  --title "LexiQode 0.2.0" --notes-file docs\release-notes\v0.2.0.md
 ```
+
+The notes file is the 0.2.0 section of `CHANGELOG.md` with a download paragraph on
+top, so the release page opens with what this version is and how to run it. The
+full changelog stays in the repository for anyone reading the history.
 
 Or, in the interface: **Releases ▸ Draft a new release ▸ choose the tag ▸ attach
 both files**. GitHub's own limits are 2 GB per asset and 100 characters per tag;
