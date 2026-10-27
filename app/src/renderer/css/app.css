@@ -1600,6 +1600,16 @@ kbd {
   align-items: center;
   gap: 2px;
   min-width: 0;
+  /*
+   * The mode is never the thing that gives way.
+   *
+   * This container scrolls, which means it can shrink to nothing and clip its
+   * own button: with a long model id beside it, "Agent" was rendered as "Ager"
+   * and the rest of the word was simply gone. `0 0 auto` keeps the button whole
+   * and makes the row overflow instead, which is a failure the user can see and
+   * do something about.
+   */
+  flex: 0 0 auto;
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -1737,12 +1747,22 @@ kbd {
  * by one.
  */
 .modelhost {
+  /*
+   * Shrinks first and hardest.
+   *
+   * A model id can be long - an endpoint that names models by url spends most of
+   * the pill on a host the user never chose - and it is the only thing on this
+   * row that can be shortened without losing a word somebody needs, so it takes
+   * the whole of any deficit down to a pill that still says which model it is.
+   */
   flex: 0 1 auto;
-  min-width: 0;
-  max-width: 210px;
+  min-width: 72px;
+  max-width: 180px;
+  overflow: hidden;
 }
 
 .modelbtn {
+  width: 100%;
   max-width: 100%;
   height: 26px;
   padding: 0 6px;
@@ -1859,20 +1879,29 @@ kbd {
  * reports. The corner is deliberate - it stays put when panels are toggled, so
  * it is the one control always in the same place.
  */
-.statusbar__item[data-role="theme"] {
+.statusbar__item[data-role="theme"],
+.statusbar__item[data-role="settings"] {
   padding: 0 6px;
   border: 1px dashed transparent;
   border-radius: var(--radius-sm);
   cursor: pointer;
 }
 
-.statusbar__item[data-role="theme"]:hover {
+.statusbar__item[data-role="theme"]:hover,
+.statusbar__item[data-role="settings"]:hover {
   border-color: var(--border-strong);
   color: var(--text);
 }
 
 .statusbar__item[data-role="theme"][data-choice="system"] {
   color: var(--text-faint);
+}
+
+/* An icon-only item: without a size an inline svg falls back to 300x150. */
+.statusbar__item[data-role="settings"] svg {
+  display: block;
+  width: 14px;
+  height: 14px;
 }
 
 .statusbar__spacer {

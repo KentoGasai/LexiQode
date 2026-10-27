@@ -248,14 +248,27 @@ const gitInfo = { branch: '', ahead: 0, behind: 0, repo: false };
 let cursorInfo = { line: 0, column: 0, language: '', lines: 0 };
 
 function statusItem(text, options = {}) {
-  return el('button', {
+  const node = el('button', {
     class: 'statusbar__item',
     type: 'button',
     title: options.title || '',
     dataset: { clickable: String(Boolean(options.onclick)), role: options.role || '' },
-    text,
     onclick: options.onclick
   });
+  /**
+   * An icon is markup from this file's own set, and a label is text.
+   *
+   * The split matters: a title from a dictionary must never be able to become
+   * markup, so only `icon(name)` is allowed to write into the element, and
+   * everything else goes in as text.
+   */
+  if (options.icon) {
+    node.innerHTML = icon(options.icon);
+    node.setAttribute('aria-label', options.title || '');
+  } else {
+    node.textContent = text;
+  }
+  return node;
 }
 
 let statusNodes = {};
@@ -274,6 +287,19 @@ function renderStatusbar() {
       title: t('status.themeTitle', { current: '', next: '' }),
       role: 'theme',
       onclick: () => void cycleTheme()
+    }),
+    /**
+     * The settings, as a button.
+     *
+     * They were reachable from the File menu, from the command palette and from
+     * `Ctrl+,` - three ways, none of them visible. A window whose settings have
+     * no button is a window whose settings most people never find.
+     */
+    settings: statusItem('', {
+      title: t('status.settingsTitle'),
+      role: 'settings',
+      icon: 'settings',
+      onclick: () => appSettings?.toggle(true)
     }),
     folder: statusItem(name, { title: workspace ? workspace.root : t('status.openFolder'), onclick: () => void openFolder() }),
     branch: statusItem(branchText, {
@@ -294,6 +320,7 @@ function renderStatusbar() {
 
   dom.statusbar.append(
     statusNodes.theme,
+    statusNodes.settings,
     statusNodes.folder,
     statusNodes.branch,
     el('span', { class: 'statusbar__spacer' }),

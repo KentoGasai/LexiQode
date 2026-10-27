@@ -288,7 +288,7 @@ open and never touch your own files:
 | `probe-chat-window.cjs` | the assistant through the window: settings, model choice, an answer, reasoning, tools, chat tabs |
 | `probe-explorer-live.cjs` | the tree follows the disk; right-click on a file and on empty space |
 | `probe-editor-colors.cjs` | seven kinds of file open with their own language and with colours: it checks the language id and counts the token colours |
-| `probe-app-features.cjs` | the shell opens with the folder, the model beside the mode, a file leaving the message and coming back, the theme button, the settings window and its write path, and what the update check reports |
+| `probe-app-features.cjs` | the shell opens with the folder, the model sits beside the mode without ever covering it (even with a long id), a file leaving the message and coming back, the theme and settings buttons, the settings window and its write path, and what the update check reports; it also leaves a picture of the composer in the temp folder |
 | `probe-update-offer.cjs` | whether a download is offered when GitHub has a newer release (needs the network; downloads nothing) |
 | `probe-chat.cjs` | the core end to end, through a stub OpenAI-compatible server |
 | `capture-screenshots.cjs` | takes the screenshots for this README (above) |

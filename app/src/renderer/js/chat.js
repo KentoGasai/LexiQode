@@ -930,6 +930,30 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
   }
 
   /**
+   * A model id as short as it can be and still name the same model.
+   *
+   * An endpoint that names its models by url - `gpt://host/deepseek/latest` -
+   * spends the whole pill on a host the user never chose, and the ellipsis then
+   * eats the part that matters: the pill read `gpt://b1gpudfqh…`, which says
+   * nothing about which model is in force. The host stays in the tooltip, in the
+   * list, and in the status bar, where a long id is not competing with anything.
+   *
+   * If two ids would shorten to the same label, every one of them is shown in
+   * full: a chooser with two identical entries is worse than a long one.
+   */
+  function shortModel(name) {
+    const text = String(name === null || name === undefined ? '' : name);
+    const shortened = text.replace(/^[a-z][\w+.-]*:\/\/[^/]+\//i, '');
+    return shortened || text;
+  }
+
+  function modelLabels(names) {
+    const short = names.map(shortModel);
+    const distinct = new Set(short).size === short.length;
+    return new Map(names.map((name, index) => [name, distinct ? short[index] : name]));
+  }
+
+  /**
    * Draw the model chooser.
    *
    * The model in force is always in the list, whether the endpoint mentioned it
@@ -960,7 +984,8 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
         : t('chat.modelTitle', { model: current || t('chat.modelNone') }),
       onchange: () => void chooseModel(picker.value)
     });
-    for (const name of names) picker.append(el('option', { value: name, text: name }));
+    const labels = modelLabels(names);
+    for (const name of names) picker.append(el('option', { value: name, text: labels.get(name) }));
     picker.value = current;
     modelHost.append(picker);
   }

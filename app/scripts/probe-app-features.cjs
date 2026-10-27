@@ -15,6 +15,8 @@
  * Run: node scripts/probe-app-features.cjs [folder]
  */
 
+const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
 const { APP, connect, listTargets, startApp, waitForDom } = require('./probe-harness.cjs');
@@ -28,6 +30,7 @@ async function main() {
   const child = startApp({ port: PORT, tag: 'features' });
   console.log(`isolated configuration: ${child.configDir}`);
   let report = null;
+  const shot = path.join(os.tmpdir(), 'lexiqode-app-features.png');
   try {
     const target = await listTargets(PORT);
     const session = await connect(target.webSocketDebuggerUrl);
@@ -50,9 +53,19 @@ async function main() {
         if (q('.tree__row')) break;
         await sleep(250);
       }
-      // The tier above is what mounts the shell, so this is where it may have
-      // happened by now; the checks below give it a moment either way.
-      await sleep(2500);
+      /*
+       * Wait for the shell rather than assume a delay.
+       *
+       * The panel opens after the agent has been started and the transcript
+       * redrawn, and how long that takes depends on the machine: a fixed sleep
+       * reports the moment before it happened, which looks exactly like the
+       * feature being broken.
+       */
+      for (let attempt = 0; attempt < 60; attempt += 1) {
+        const sessions = await window.lexiqode.terminal.list().catch(() => []);
+        if (!q('#panel').hidden && sessions.length) break;
+        await sleep(400);
+      }
 
       out.terminal = {
         panelVisible: !q('#panel').hidden,
@@ -80,14 +93,69 @@ async function main() {
       // ------------------------------------------------ the model beside the mode
       const modes = q('#composer-modes');
       const modelHost = q('#composer-model');
+      const modeButton = modes ? modes.querySelector('.modebtn') : null;
       out.composer = {
         modeButton: text('#composer-modes .modebtn'),
         modelHost: Boolean(modelHost),
         immediatelyAfterTheMode: Boolean(modes && modelHost && modes.nextElementSibling === modelHost),
         control: modelHost ? (modelHost.querySelector('select') ? 'select' : modelHost.querySelector('.modelnone') ? 'placeholder' : 'none') : 'missing',
         text: modelHost ? modelHost.textContent.trim() : '',
-        title: modelHost ? (modelHost.querySelector('select, .modelnone') || {}).title || '' : ''
+        title: modelHost ? (modelHost.querySelector('select, .modelnone') || {}).title || '' : '',
+        selected: modelHost && modelHost.querySelector('select') ? modelHost.querySelector('select').selectedOptions[0].text : ''
       };
+      /**
+       * The two panels, measured against each other.
+       *
+       * This is the check for the bug where the mode button read "Ager": the
+       * container that holds it scrolls, so a long model id beside it squeezed
+       * the container and the rest of the word was clipped away. A container
+       * whose content is wider than its box is that bug, whether it shows.
+       */
+      if (modes && modeButton && modelHost) {
+        const modeBox = modeButton.getBoundingClientRect();
+        const modelBox = modelHost.getBoundingClientRect();
+        out.composer.geometry = {
+          modeLabel: modeButton.textContent.trim(),
+          modeWidth: Math.round(modeBox.width),
+          modelWidth: Math.round(modelBox.width),
+          gap: Math.round(modelBox.left - modeBox.right),
+          overlaps: modelBox.left < modeBox.right - 0.5,
+          modeContainer: Math.round(modes.clientWidth),
+          modeContent: Math.round(modes.scrollWidth),
+          clipped: modes.scrollWidth > modes.clientWidth + 1
+        };
+
+        /*
+         * The same measurement with the longest id an endpoint can hand us.
+         *
+         * This window has no profile saved, so what is drawn is the placeholder
+         * and the pressure on the row is small; the reported bug showed up with a
+         * model named by url. The long label is fed through the same element in
+         * the same place, because the squeeze that clipped "Agent" into "Ager" is
+         * a property of the row's layout, not of where the text came from.
+         */
+        const longId = 'gpt://b1gpudfqh473jggh7tjp/deepseek-v4.1-flash/latest';
+        const picker = modelHost.querySelector('select');
+        if (picker) {
+          picker.options[0].text = longId;
+        } else {
+          const standIn = document.createElement('select');
+          standIn.className = 'modelbtn';
+          standIn.append(new Option(longId, longId));
+          modelHost.replaceChildren(standIn);
+        }
+        await sleep(250);
+        const wideModeBox = modeButton.getBoundingClientRect();
+        const wideModelBox = modelHost.getBoundingClientRect();
+        out.composer.longModel = {
+          modeLabel: modeButton.textContent.trim(),
+          modeWidth: Math.round(wideModeBox.width),
+          modelWidth: Math.round(wideModelBox.width),
+          gap: Math.round(wideModelBox.left - wideModeBox.right),
+          overlaps: wideModelBox.left < wideModeBox.right - 0.5,
+          clipped: modes.scrollWidth > modes.clientWidth + 1
+        };
+      }
 
       // --------------------------------------------- taking a file out of a message
       // Only the chips that carry a cross count as being in the message: the
@@ -145,6 +213,27 @@ async function main() {
       }
 
       // ---------------------------------------------------------- the settings dialog
+      // The button first: the dialog being reachable from a key is not the same
+      // thing as it being reachable from the window.
+      const settingsButton = q('#statusbar .statusbar__item[data-role="settings"]');
+      out.settingsButton = {
+        present: Boolean(settingsButton),
+        title: settingsButton ? settingsButton.title : '',
+        icon: Boolean(settingsButton && settingsButton.querySelector('svg')),
+        inTheStatusbar: Boolean(settingsButton && settingsButton.parentElement === q('#statusbar')),
+        afterTheThemeButton: Boolean(
+          settingsButton && settingsButton.previousElementSibling && settingsButton.previousElementSibling.dataset.role === 'theme'
+        )
+      };
+      if (settingsButton) {
+        settingsButton.click();
+        await sleep(500);
+        out.settingsButton.opened = !q('#settings-overlay').hidden;
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        await sleep(300);
+        out.settingsButton.closedByEscape = q('#settings-overlay').hidden;
+      }
+
       document.dispatchEvent(new KeyboardEvent('keydown', { key: ',', ctrlKey: true, bubbles: true }));
       await sleep(500);
       const overlay = q('#settings-overlay');
@@ -187,11 +276,28 @@ async function main() {
       };
       return out;
     `);
+    /*
+     * A picture of the row itself.
+     *
+     * A layout defect is something to look at: the numbers above say whether a
+     * box is clipped, and the picture says whether the row reads well. The
+     * notifications are cleared first, because a toast sits over exactly this
+     * corner of the window and the subject of the picture is the layout.
+     */
+    const clip = await session.evaluate(`
+      for (const toast of document.querySelectorAll('.toast')) toast.remove();
+      const box = document.getElementById('composer').getBoundingClientRect();
+      return { x: Math.max(0, Math.floor(box.x) - 4), y: Math.max(0, Math.floor(box.y) - 4),
+               width: Math.ceil(box.width) + 8, height: Math.ceil(box.height) + 8, scale: 2 };
+    `);
+    const { data } = await session.send('Page.captureScreenshot', { format: 'png', clip });
+    fs.writeFileSync(shot, Buffer.from(data, 'base64'));
   } finally {
     child.kill();
   }
 
   console.log(JSON.stringify(report, null, 2));
+  console.log(`\nscreenshot: ${shot}`);
 
   // What has to be true for the run to count as a pass.
   const failures = [];
@@ -210,6 +316,29 @@ async function main() {
   );
   expect(report && report.composer.immediatelyAfterTheMode, 'the model control is not next to the mode button');
   expect(report && report.composer.control !== 'missing' && report.composer.control !== 'none', 'no model control was drawn');
+  expect(
+    report && report.composer.geometry && report.composer.geometry.overlaps === false,
+    'the model chooser is drawn over the mode button'
+  );
+  expect(
+    report && report.composer.geometry && report.composer.geometry.clipped === false,
+    `the mode button is clipped by its own container (${report && report.composer.geometry ? `${report.composer.geometry.modeContainer}px of ${report.composer.geometry.modeContent}px` : 'no measurement'})`
+  );
+  expect(
+    report && report.composer.geometry && report.composer.geometry.modeLabel.length >= 3,
+    'the mode button does not show its label'
+  );
+  const longModel = report && report.composer ? report.composer.longModel : null;
+  expect(Boolean(longModel), 'the long model id case was not measured');
+  expect(longModel && longModel.overlaps === false, 'a long model id draws the chooser over the mode button');
+  expect(longModel && longModel.clipped === false, 'a long model id clips the mode button');
+  expect(longModel && longModel.modeLabel.length >= 3, 'a long model id leaves the mode button without its label');
+  expect(longModel && longModel.modelWidth <= 180, `the model chooser grew past its limit (${longModel ? longModel.modelWidth : '?'}px)`);
+  expect(report && report.settingsButton.present, 'there is no button for the settings');
+  expect(report && report.settingsButton.icon, 'the settings button has no icon');
+  expect(report && report.settingsButton.inTheStatusbar, 'the settings button is not in the status bar');
+  expect(report && report.settingsButton.opened, 'clicking the settings button did not open the settings');
+  expect(report && report.settingsButton.closedByEscape, 'Escape did not close the settings opened from the button');
   expect(report && report.context.before.length >= 1, 'the open file was not offered with the message');
   expect(report && report.context.before.some((line) => line.includes('×')), 'the file chip has no way to remove it');
   expect(report && report.context.afterDrop.length === 0, 'removing the file from the message did not work');

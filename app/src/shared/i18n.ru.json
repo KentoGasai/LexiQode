@@ -300,6 +300,7 @@
 
   "status.theme": "тема: {theme}",
   "status.themeTitle": "Тема: {current}. Нажмите, чтобы переключить на {next}.",
+  "status.settingsTitle": "Настройки (Ctrl+,)",
 
   "cmd.appSettings": "Настройки: собственные настройки окна",
   "cmd.checkUpdates": "Обновления: проверить новую версию",

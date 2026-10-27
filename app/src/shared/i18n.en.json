@@ -300,6 +300,7 @@
 
   "status.theme": "theme: {theme}",
   "status.themeTitle": "Theme: {current}. Click for {next}.",
+  "status.settingsTitle": "Settings (Ctrl+,)",
 
   "cmd.appSettings": "Settings: the window's own settings",
   "cmd.checkUpdates": "Updates: check for a newer release",

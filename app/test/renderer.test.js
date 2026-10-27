@@ -200,3 +200,46 @@ test('the theme button cycles through every theme and says what it will do', () 
   assert.match(source, /next: themeName\(nextTheme\(choice\)\)/, 'and the theme the next click gives');
   assert.match(source, /case 'theme\.toggle':[\s\S]{0,120}cycleTheme\(\)/, 'the palette runs the same cycle');
 });
+
+/** A rule's body, so a CSS contract can be read without a browser. */
+function cssRule(source, selector) {
+  const start = source.indexOf(`${selector} {`);
+  assert.notEqual(start, -1, `${selector} should be a rule in app.css`);
+  return source.slice(start, source.indexOf('}', start));
+}
+
+/**
+ * The settings need a button, not only a shortcut.
+ *
+ * They were reachable three ways - the File menu, the palette and `Ctrl+,` - and
+ * none of them was visible, which for a settings dialog means most people never
+ * find it. The button sits in the status bar beside the theme button.
+ */
+test('the settings have a button in the status bar', () => {
+  const source = fs.readFileSync(path.join(JS, 'main.js'), 'utf8');
+  assert.match(source, /role: 'settings'/, 'the status bar should carry a settings item');
+  assert.match(source, /icon: 'settings'/, 'as an icon, so the bar does not gain a word');
+  assert.match(source, /statusNodes\.settings,/, 'and the item has to be appended to the bar');
+});
+
+/**
+ * A long model id may not squeeze the mode button out of its own label.
+ *
+ * The mode button lives in a container that scrolls, so that container can
+ * shrink to nothing and clip it: reported from a running window, "Agent" was
+ * rendered as "Ager" and the model pill covered the rest. The mode is now the
+ * one thing on that row that cannot give way, and the model chooser - the only
+ * thing whose text can be shortened without losing meaning - gives way first.
+ */
+test('the mode button is not the thing that shrinks, the model chooser is', () => {
+  const css = fs.readFileSync(path.join(RENDERER, 'css', 'app.css'), 'utf8');
+  assert.match(
+    cssRule(css, '.modes'),
+    /flex:\s*0 0 auto/,
+    'the container of the mode button still shrinks, and it clips its own button when it does'
+  );
+  const host = cssRule(css, '.modelhost');
+  assert.match(host, /min-width:/, 'the model chooser needs a floor to shrink to');
+  assert.match(host, /max-width:/, 'and a limit on how much of the row it may take');
+  assert.match(cssRule(css, '.modelbtn'), /width:\s*100%/, 'the chooser fills the box the layout gives it');
+});
