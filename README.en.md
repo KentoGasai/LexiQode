@@ -289,6 +289,7 @@ open and never touch your own files:
 | `probe-explorer-live.cjs` | the tree follows the disk; right-click on a file and on empty space |
 | `probe-editor-colors.cjs` | seven kinds of file open with their own language and with colours: it checks the language id and counts the token colours |
 | `probe-app-features.cjs` | the shell opens with the folder, the model beside the mode, a file leaving the message and coming back, the theme button, the settings window and its write path, and what the update check reports |
+| `probe-update-offer.cjs` | whether a download is offered when GitHub has a newer release (needs the network; downloads nothing) |
 | `probe-chat.cjs` | the core end to end, through a stub OpenAI-compatible server |
 | `capture-screenshots.cjs` | takes the screenshots for this README (above) |
 
