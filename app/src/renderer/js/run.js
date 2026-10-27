@@ -124,9 +124,3 @@ function plan({ interpreter, file, root, kind, extension }) {
   const command = parts.join(kind === 'powershell' ? '; ' : ' && ');
   return { extension, interpreter, file, relative, shell: kind, command };
 }
-
-/** A one-line description of what Run will do, for a tooltip or a message. */
-export function describe(file, plan) {
-  if (!plan) return '';
-  return `${plan.command}`;
-}
