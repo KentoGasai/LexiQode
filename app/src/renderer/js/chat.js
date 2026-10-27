@@ -42,6 +42,7 @@ import { renderMarkdown } from './markdown.js';
 import { agentStateKey, current as i18nInfo, t } from './i18n.js';
 import { describeArguments, formatTokens } from './tool-arguments.js';
 import { menuPoint, openContextMenu } from './context-menu.js';
+import { askText } from './ask.js';
 
 /**
  * The marker the core puts on the message that replaces a summarised part of a
@@ -778,7 +779,13 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
 
   async function renameChat(id) {
     const current = state.conversations.find((row) => row.id === id);
-    const name = window.prompt(t('chat.renamePrompt'), (current && current.title) || '');
+    // Not `window.prompt`: Electron does not implement it, so renaming a chat did
+    // nothing at all. The window's own field is one click away (see `ask.js`).
+    const name = await askText({
+      title: t('chat.renamePrompt'),
+      value: (current && current.title) || '',
+      confirm: t('chat.renameAction')
+    });
     if (!name) return;
     try {
       await api.agent.renameConversation(id, name);

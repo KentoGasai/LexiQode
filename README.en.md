@@ -46,7 +46,7 @@ model, and how much of the model's window is in use is shown under the composer.
 | Editor | Monaco: syntax highlighting, tabs, unsaved-change marker, find in file, line endings preserved as they were |
 | Suggestions | words from the open file in any language; for JavaScript, TypeScript, JSON, CSS and HTML a language service: members, signatures, parameter hints and underlined mistakes |
 | Running code | a ▶ button in the top-right corner of the editor, and `F5`: the open file is saved and run in the shell below - `.js`, `.mjs`, `.cjs` through `node`, `.py` through `python`, `.ps1`, `.bat`, `.cmd` and `.sh` through their own interpreter |
-| Explorer | file tree that follows the disk by itself, right-click menu on a file and on a folder, add a file to the assistant's context, create, rename, delete to the recycle bin, reveal in Explorer, copy path |
+| Explorer | file tree that follows the disk by itself, right-click menu on a file and on a folder, add a file to the assistant's context, create and rename in the tree itself (the name is typed in the row, Enter takes it), folders marked with a chevron - right while closed, down while open - delete to the recycle bin, reveal in Explorer, copy path |
 | Navigation | go to file with `Ctrl+P` using fuzzy matching, command palette |
 | Search | find in files with streaming results and cancellation |
 | Source control | git: staged and unstaged separated, diffs, stage, unstage, discard, commit, branch switching |
@@ -279,9 +279,14 @@ cd core;  python -m pytest tests -q
 cd app;   npm test
 ```
 
-Ten scripts start the application and interrogate it from outside. All of them run
+The probes start the application and interrogate it from outside. All of them run
 with an isolated configuration, so they can be started while the application is
-open and never touch your own files:
+open and never touch your own files. The list below is the behaviour of the window;
+beside it in `app/scripts` sit narrower ones - the code page of PowerShell's output,
+a shell driven through a pipe, the geometry of the suggestion list.
+
+Run the ones that open a window one at a time: two windows occlude each other, and a
+window behind another has its frames throttled.
 
 | Script | What it checks |
 |---|---|
@@ -289,6 +294,7 @@ open and never touch your own files:
 | `probe-interactions.cjs` | the panels with no folder open, dragging boundaries, saving by keyboard |
 | `probe-chat-window.cjs` | the assistant through the window: settings, model choice, a step-by-step answer (two steps as two blocks, the second "Thinking…" after the first answer), the reasoning switch all the way to the request, tools, chat tabs |
 | `probe-explorer-live.cjs` | the tree follows the disk; right-click on a file and on empty space |
+| `probe-explorer-create.cjs` | "+" creates what was typed, rename edits the row in place, and a folder's chevron points right while closed and down while open - the tree and the disk are both checked |
 | `probe-editor-colors.cjs` | seven kinds of file open with their own language and with colours: it checks the language id and counts the token colours |
 | `probe-editor-suggest.cjs` | suggestions while typing: a document word for Python and a suggestion carrying a signature for JavaScript, plus underlined errors - which is what says the language service runs rather than only the tokenizer |
 | `probe-run.cjs` | the ▶ button really runs code: it writes a small script into a temporary folder, opens it, presses the button and waits for what the script prints |

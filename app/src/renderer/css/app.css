@@ -761,18 +761,70 @@ kbd {
   color: var(--text);
 }
 
+/*
+ * The two markers of a tree row, both drawn rather than typed.
+ *
+ * They used to be the characters '▸' / '▾' for the disclosure and '▣' for a
+ * folder, and the window's font has none of them: all three rendered as empty
+ * squares, which is what "why are folders marked with squares" was about. The
+ * chevron points right while the folder is closed and down while it is open, so
+ * the direction says which way the folder will move.
+ */
 .tree__twisty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex: 0 0 14px;
-  text-align: center;
-  font-size: 9px;
   color: var(--text-faint);
 }
 
+.tree__twisty svg {
+  width: 12px;
+  height: 12px;
+  transform: rotate(-90deg);
+  transition: transform 0.12s ease;
+}
+
+.tree__twisty[data-open='true'] svg {
+  transform: rotate(0deg);
+}
+
 .tree__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex: 0 0 14px;
   font-size: 11px;
-  text-align: center;
   color: var(--text-faint);
+}
+
+.tree__icon svg {
+  width: 13px;
+  height: 13px;
+}
+
+/*
+ * A name being typed, in the tree, where the item will appear.
+ *
+ * This is the field that replaced `window.prompt`, which Electron does not
+ * implement - so the "+" buttons and Rename silently did nothing.
+ */
+.tree__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 18px;
+  padding: 0 4px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  outline: none;
+}
+
+.tree__row--editing {
+  background: var(--surface-2);
+  cursor: default;
 }
 
 .tree__label {
@@ -2086,6 +2138,62 @@ kbd {
 
 .overlay[hidden] {
   display: none;
+}
+
+/*
+ * One line of text, asked in the window's own field (see `ask.js`).
+ *
+ * Above the palette: a question stops what is behind it, and the palette is
+ * opened by a chord that must not answer a question the user is already in.
+ */
+.ask {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  justify-content: center;
+  padding-top: 16vh;
+  background: rgba(6, 6, 10, 0.46);
+}
+
+.ask__box {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  width: min(460px, 90vw);
+  height: fit-content;
+  padding: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.ask__title {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.ask__input {
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  outline: none;
+}
+
+.ask__input:focus {
+  border-color: var(--accent);
+}
+
+.ask__row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
 }
 
 .palette {

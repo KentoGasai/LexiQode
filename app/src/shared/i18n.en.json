@@ -78,6 +78,8 @@
   "git.commitNeedsMessage": "a commit message is required",
   "git.nothingStaged": "nothing is staged",
   "git.branchPrompt": "Checkout which branch?",
+  "git.branchCurrent": "{name} — current",
+  "git.noBranches": "this repository has no branches",
   "git.onBranch": "on {name}",
 
   "terminal.new": "New terminal",
@@ -135,6 +137,7 @@
   "chat.noSavedChats": "No saved chats yet",
   "chat.renameChat": "Rename chat",
   "chat.renamePrompt": "Chat name",
+  "chat.renameAction": "Rename",
   "chat.deleteChat": "Delete chat",
   "chat.deleteConfirm": "Delete the chat \"{title}\"?",
   "chat.deleteDetail": "The conversation is removed from disk and cannot be restored.",
@@ -418,5 +421,7 @@
 
   "toast.contextAdded": "{path} goes with the next message",
   "toast.contextRemoved": "{path} stays out of the next message",
-  "toast.terminalOpened": "opened a shell in {folder}"
+  "toast.terminalOpened": "opened a shell in {folder}",
+  "ask.confirm": "Done",
+  "ask.cancel": "Cancel"
 }

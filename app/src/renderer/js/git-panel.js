@@ -13,6 +13,7 @@
 
 import { clear, el, iconButton, toast } from './ui.js';
 import { t } from './i18n.js';
+import { menuPoint, openContextMenu } from './context-menu.js';
 
 export function createGitPanel({ api, onOpenDiff, onNotice, onOpenFolder }) {
   const host = document.getElementById('sidebar-body');
@@ -192,7 +193,7 @@ export function createGitPanel({ api, onOpenDiff, onNotice, onOpenFolder }) {
           .filter(Boolean)
           .join(' ')
       }),
-      iconButton('branch', t('git.branchPrompt'), () => void switchBranch()),
+      iconButton('branch', t('git.branchPrompt'), (event) => void switchBranch(event)),
       iconButton('refresh', t('git.refresh'), () => void refresh())
     ]);
     host.append(branch, el('div', { class: 'commit' }, [message])); 
@@ -221,24 +222,38 @@ export function createGitPanel({ api, onOpenDiff, onNotice, onOpenFolder }) {
     }
   }
 
-  async function switchBranch() {
+  /**
+   * Pick a branch from a menu, rather than typing its number.
+   *
+   * This was `window.prompt` with a numbered list, and Electron does not implement
+   * `window.prompt`: it returned null without showing anything, so switching a
+   * branch did nothing and read as broken. The menu also removes the counting: a
+   * branch is chosen by its name.
+   */
+  async function switchBranch(event) {
     const result = await api.git.branches();
     if (!result.ok) {
       toast('error', result.error || 'could not list branches');
       return;
     }
     const list = result.branches;
-    const answer = window.prompt(
-      `${t('git.branchPrompt')}\n\n${list
-        .map((branch, index) => `${index + 1}. ${branch.name}${branch.current ? ' (current)' : ''}`)
-        .join('\n')}`,
-      String(Math.max(1, list.findIndex((branch) => branch.current) + 1))
-    );
-    const index = Number(answer);
-    if (!Number.isInteger(index) || index < 1 || index > list.length) return;
-    const target = list[index - 1];
-    if (target.current) return;
-    await act(() => api.git.checkout(target.name), t('git.onBranch', { name: target.name }));
+    if (!list.length) {
+      toast('info', t('git.noBranches'));
+      return;
+    }
+    const point = event ? menuPoint(event) : { x: 0, y: 0 };
+    openContextMenu({
+      ...point,
+      label: t('git.branchPrompt'),
+      items: list.map((branch) => ({
+        label: branch.current ? t('git.branchCurrent', { name: branch.name }) : branch.name,
+        // The branch that is already checked out is shown, not offered: choosing it
+        // would be a command that does nothing.
+        run: branch.current
+          ? () => {}
+          : () => void act(() => api.git.checkout(branch.name), t('git.onBranch', { name: branch.name }))
+      }))
+    });
   }
 
   function mount() {

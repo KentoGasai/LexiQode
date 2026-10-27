@@ -27,6 +27,60 @@ const jsFiles = fs.readdirSync(JS).filter((name) => name.endsWith('.js'));
 const html = fs.readFileSync(path.join(RENDERER, 'index.html'), 'utf8');
 const constants = fs.readFileSync(path.join(APP, 'src', 'shared', 'constants.js'), 'utf8');
 
+/** Source without its comments: a note about a mistake is not the mistake. */
+function stripComments(source) {
+  return String(source)
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '');
+}
+
+/**
+ * Nothing waits on a browser prompt.
+ *
+ * Electron does not implement `window.prompt`: it returns null without showing
+ * anything at all. Four features asked through it - creating a file, renaming one,
+ * renaming a chat, switching a branch - and every one of them did nothing when it
+ * was used, which was reported four times as four unrelated broken buttons. The
+ * window asks in its own field now (see `ask.js`), and this is what keeps the next
+ * one from being written by accident.
+ */
+test('the window never asks through window.prompt', () => {
+  const offenders = [];
+  for (const file of jsFiles) {
+    const code = stripComments(fs.readFileSync(path.join(JS, file), 'utf8'));
+    if (/window\.prompt\s*\(/.test(code)) offenders.push(file);
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    `these ask through window.prompt, which Electron never shows: ${offenders.join(', ')}`
+  );
+});
+
+/**
+ * The tree's two markers are drawn, because the font has no glyph for them.
+ *
+ * The disclosure marker was the character '▸' / '▾' and a folder was '▣'. The
+ * window's own font contains none of the three, so every folder in the tree was
+ * marked with an empty square - reported as "why are folders marked with squares".
+ * The chevron is an icon that turns a quarter turn, and a folder is the same drawn
+ * outline the sidebar's own tab uses.
+ */
+test('the tree draws its markers instead of typing them', () => {
+  const code = stripComments(fs.readFileSync(path.join(JS, 'explorer.js'), 'utf8'));
+  assert.match(code, /icon\('chevron'\)/, 'the disclosure marker is a drawn chevron');
+  assert.match(code, /icon\('files'\)/, 'and a folder is a drawn outline');
+  assert.doesNotMatch(code, /[▸▾▣]/, 'no glyph the font may not have');
+
+  const css = fs.readFileSync(path.join(RENDERER, 'css', 'app.css'), 'utf8');
+  assert.match(css, /rotate\(-90deg\)/, 'the chevron points right while a folder is closed');
+  assert.match(
+    css,
+    /\.tree__twisty\[data-open='true'\]/,
+    'and turns down when it opens, so the direction says what will happen'
+  );
+});
+
 test('the window has the sources it needs', () => {
   for (const required of ['main.js', 'ui.js', 'editor.js', 'explorer.js', 'chat.js', 'markdown.js', 'fuzzy.js']) {
     assert.ok(jsFiles.includes(required), `${required} is missing`);

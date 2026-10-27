@@ -1,7 +1,7 @@
 {
   "name": "lexiqode",
   "productName": "LexiQode",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "description": "LexiQode - an AI IDE on your own OpenAI-compatible endpoint",
   "license": "MIT",

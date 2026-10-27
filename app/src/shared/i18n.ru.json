@@ -78,6 +78,8 @@
   "git.commitNeedsMessage": "нужно сообщение коммита",
   "git.nothingStaged": "нечего фиксировать: ничего не подготовлено",
   "git.branchPrompt": "Переключиться на ветку:",
+  "git.branchCurrent": "{name} — текущая",
+  "git.noBranches": "в репозитории нет веток",
   "git.onBranch": "текущая ветка: {name}",
 
   "terminal.new": "Новый терминал",
@@ -135,6 +137,7 @@
   "chat.noSavedChats": "Сохранённых чатов пока нет",
   "chat.renameChat": "Переименовать чат",
   "chat.renamePrompt": "Название чата",
+  "chat.renameAction": "Переименовать",
   "chat.deleteChat": "Удалить чат",
   "chat.deleteConfirm": "Удалить чат «{title}»?",
   "chat.deleteDetail": "Разговор будет удалён с диска, вернуть его будет нельзя.",
@@ -418,5 +421,7 @@
 
   "toast.contextAdded": "{path} пойдёт со следующим сообщением",
   "toast.contextRemoved": "{path} не пойдёт со следующим сообщением",
-  "toast.terminalOpened": "открыл оболочку в {folder}"
+  "toast.terminalOpened": "открыл оболочку в {folder}",
+  "ask.confirm": "Готово",
+  "ask.cancel": "Отмена"
 }
