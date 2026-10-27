@@ -93,6 +93,15 @@
             ></textarea>
             <div class="composer__row">
               <div class="modes" id="composer-modes"></div>
+              <!--
+                The model, beside the mode.
+
+                Both decide what the next message does, so they belong together,
+                next to the field: the mode says what the agent may do and the
+                model says who does it. Until now the only place to change the
+                model was the settings sheet, and the status bar only reported it.
+              -->
+              <div class="modelhost" id="composer-model"></div>
               <div class="composer__spacer"></div>
               <button class="btn btn--ghost" id="composer-stop" type="button" data-i18n="chat.stop" hidden>Stop</button>
               <button class="btn btn--primary" id="composer-send" type="button" data-i18n="chat.send">Send</button>
@@ -109,6 +118,41 @@
         <input id="palette-input" class="palette__input" type="text" spellcheck="false" autocomplete="off" />
         <div class="palette__list" id="palette-list"></div>
         <div class="palette__hint" id="palette-hint"></div>
+      </div>
+    </div>
+
+    <!--
+      The window's own settings.
+
+      The assistant's sheet in the chat panel is about the agent - an endpoint, a
+      key, a model. This one is about the window: how it looks, what the editor
+      does, which folders are skipped, where the terminal starts, and whether a
+      newer release is looked for at all.
+    -->
+    <div class="overlay" id="settings-overlay" hidden>
+      <div class="settings" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+        <div class="settings__head">
+          <span class="settings__title" id="settings-title" data-i18n="settings.appTitle">Settings</span>
+          <div class="settings__head-actions" id="settings-head-actions"></div>
+        </div>
+        <div class="settings__body" id="settings-body"></div>
+      </div>
+    </div>
+
+    <!--
+      A new release, offered.
+
+      The update is downloaded and installed by the main process, which is also
+      where the swap script is written: the window only ever says what it wants
+      to happen.
+    -->
+    <div class="overlay" id="update-overlay" hidden>
+      <div class="settings settings--narrow" role="dialog" aria-modal="true" aria-labelledby="update-title">
+        <div class="settings__head">
+          <span class="settings__title" id="update-title" data-i18n="update.title">An update is available</span>
+          <div class="settings__head-actions" id="update-head-actions"></div>
+        </div>
+        <div class="settings__body" id="update-body"></div>
       </div>
     </div>
 

@@ -27,7 +27,7 @@ function fileIcon(name) {
   return '·';
 }
 
-export function createExplorer({ api, onOpen, onNotice, activePath }) {
+export function createExplorer({ api, onOpen, onNotice, activePath, onToggleContext, isContextFile }) {
   const host = document.getElementById('sidebar-body');
   const actions = document.getElementById('sidebar-actions');
   const tree = el('div', { class: 'tree' });
@@ -178,8 +178,13 @@ export function createExplorer({ api, onOpen, onNotice, activePath }) {
    * Ordered the way the actions are used rather than the way they are
    * implemented: open, look at it on disk, take its path, then the operations
    * that change it, with the one that destroys something last and red.
+   *
+   * "Add to the assistant's context" sits beside Open, because it is an action
+   * on the file the user is looking at and the composer's own row only ever
+   * showed the file that happens to be in the editor.
    */
   function openRowMenu(item, point) {
+    const attached = !item.directory && Boolean(isContextFile && isContextFile(item.path));
     const items = item.directory
       ? [
           { label: t('explorer.newFile'), run: () => create('file', item.path) },
@@ -198,6 +203,10 @@ export function createExplorer({ api, onOpen, onNotice, activePath }) {
       : [
           { label: t('explorer.open'), run: () => onOpen(item.path) },
           { label: t('explorer.openBeside'), run: () => onOpen(item.path, { beside: true }) },
+          {
+            label: attached ? t('explorer.removeContext') : t('explorer.addContext'),
+            run: () => onToggleContext && onToggleContext(item.path)
+          },
           { separator: true },
           { label: t('explorer.reveal'), run: () => api.workspace.reveal(item.path) },
           { label: t('explorer.copyPath'), run: () => copy(absolute(item.path), 'explorer.copiedPath') },

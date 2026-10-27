@@ -6,6 +6,92 @@ adds features, and the patch number a release that only fixes them. Nothing in
 this file is retrospective filler - each entry is a change that was made,
 measured on a running window, and re-checked by a test or a probe.
 
+## Unreleased - planned 0.3.0
+
+Everything below is in the repository and verified by the suite and the probes,
+and none of it is in the 0.2.0 tag: the tag is published, so these changes belong
+to the next release rather than to a rewritten past.
+
+### Files are coloured again
+
+* A file was given its own extension as its language, so `.js`, `.ts`, `.py`,
+  `.md`, `.ps1` and `.yml` were never a language Monaco knew: they opened as
+  plain text, with no colours and no language service, and nothing threw to say
+  so. Only `.json`, `.css` and `.html` looked right, and only because for those
+  three the extension and the language id happen to be the same word.
+* The language is now asked of Monaco's own registry - name first, so a
+  `Dockerfile` or a `Makefile` is recognised, then extension - and the id the
+  entry carries is what the model is created with.
+* Measured on a running window: seven files of seven kinds, each with the right
+  language id and between 3 and 8 distinct token colours. Before the change, all
+  seven were `plaintext` with one.
+
+### The message's context is the user's to edit
+
+* A file that appeared in the context by itself could not be taken out. Every file
+  the next message will carry is now a chip with a cross, an "add a file" button
+  offers the file in the editor, and the tree's own menu adds and removes files by
+  right-click, where files are actually found.
+* Removing means removing: taking out the file that is open in the editor sets
+  it aside for the message instead of unpinning it and letting the preference
+  draw it again.
+* The pinned files are named in the preamble the agent receives, deduplicated and
+  bounded, and they are named rather than read: the agent has tools for reading.
+
+### The model, beside the mode
+
+* The model in force is a chooser next to the mode button, where the two
+  decisions that shape a message belong together. The list is the endpoint's own,
+  asked once per profile, and choosing writes the model into the profile the core
+  already has - so the endpoint, the key and the limits survive.
+
+### A button for the theme, and settings of the window's own
+
+* The theme has a button in the bottom-left corner of the status bar. It cycles
+  dark, light and "follow the system", names the current theme and says what the
+  next click will do; the palette command runs the same cycle.
+* The window has a settings dialog at `Ctrl+,` (File ▸ Settings…, or the
+  palette): appearance, editor, layout, files, terminal, assistant defaults,
+  updates, and the version. Every control writes through the settings API, and
+  the dialog redraws from the file rather than believing itself.
+* `includeActiveFile` and `includeSelection` finally have a surface: they
+  decided what every message carried and could only be changed in JSON.
+
+### A folder opens with a shell in it
+
+* Opening a folder shows a PowerShell session already in that folder in the
+  bottom panel. A session belongs to the directory it was started in, so the one
+  from the previous folder is closed rather than left pointing elsewhere.
+  `terminal.openWithFolder` turns it off.
+
+### A new release is looked for, and installed after the app has gone
+
+* On start, and on demand from Help ▸ Check for Updates…, the newest release is
+  read from GitHub. A newer one is offered in a window with its notes, a Download
+  button and a link to the release page.
+* The install is the part worth describing, because a running application cannot
+  replace its own files on Windows. The archive is downloaded to
+  `%APPDATA%\LexiQode\updates`, unpacked completely, and handed to
+  `apply-update.ps1`, which is started detached and waits for the application's
+  process to disappear. Only then is the application folder renamed aside, the
+  new tree moved into its place, the new version started, and the old folder
+  removed. If any step fails the previous version is renamed back and started
+  again, and every step is appended to a log next to the archive.
+* Settings and per-machine data live outside the application folder, so replacing
+  it does not touch a single preference.
+* A build started from source refuses to replace itself and says so.
+
+### Verified
+
+* 179 window tests and 162 core tests. Two new probes drive the real window: one
+  opens files of seven kinds and counts the token colours, the other exercises
+  the shell that opens with a folder, the model chooser, taking a file out of a
+  message and putting it back, the theme button, the settings dialog and its
+  write path, and what the update check reports.
+* The update check was exercised against GitHub's release API itself, not only
+  against a stub: pointed at a public repository it read the newest release,
+  compared it with the running version, and picked an archive.
+
 ## 0.2.0 - 2026-10-26
 
 The first release with a working assistant, and the reason this project exists at

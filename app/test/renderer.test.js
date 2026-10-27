@@ -141,3 +141,62 @@ test('the settings form sends only the fields the core documents', () => {
     assert.ok(known.has(key), `chat.js sends an undocumented settings key: ${key}`);
   }
 });
+
+/**
+ * The editor colours a file with the language Monaco knows it by.
+ *
+ * This used to be the file's own extension, and only files whose extension
+ * happens to equal the language id - `.json`, `.css`, `.html` - were coloured.
+ * Everything else, including every `.js`, `.ts`, `.py` and `.md`, opened as
+ * plain text: no colours, no language service, and nothing thrown to say so.
+ * The check is static because the failure is silent and the window has no
+ * compiler; the live probes open real files and count the token colours.
+ */
+test('a file is coloured by a language id from the registry, not by its extension', () => {
+  const source = fs.readFileSync(path.join(JS, 'editor.js'), 'utf8');
+  assert.match(source, /monaco\.languages\.getLanguages\(\)/, 'the registry is the only authority');
+  assert.match(source, /table\.filenames\.get\(name\)/, 'a name the registry knows wins over its extension');
+  assert.match(source, /return table\.extensions\.get\(/, 'an extension is resolved through the registry');
+  assert.doesNotMatch(
+    source,
+    /return known \? extension : 'plaintext'/,
+    'the extension itself is not a language id: `.js` is not one, and that is what opened every script as text'
+  );
+});
+
+/**
+ * A file can be taken out of the message, and put back in from the tree.
+ *
+ * The two halves have to exist together: a chip without a cross is the state
+ * this replaced - a file that appeared in the context by itself and could not be
+ * removed - and a cross without a way to add a file back would make the
+ * preference a one-way door.
+ */
+test('the message context can be edited from both ends', () => {
+  const chat = fs.readFileSync(path.join(JS, 'chat.js'), 'utf8');
+  const explorer = fs.readFileSync(path.join(JS, 'explorer.js'), 'utf8');
+  const renderer = fs.readFileSync(path.join(JS, 'main.js'), 'utf8');
+  assert.match(chat, /contextFiles: \[\]/, 'the panel should hold the files the user pinned');
+  assert.match(chat, /function contextChip\(/, 'a file in the message is drawn as a chip with a control');
+  assert.match(chat, /class: 'ctx__drop'/, 'the chip carries a cross');
+  assert.match(chat, /files: contextFiles\(\)/, 'the pinned files are sent with the message');
+  assert.match(explorer, /onToggleContext/, 'the tree can put a file into the context');
+  assert.match(renderer, /isContextFile: \(path\)/, 'the tree asks the panel what is already in it');
+});
+
+/**
+ * The theme has a button, and the button reaches all three of its states.
+ *
+ * The palette could switch between dark and light, and the settings file could
+ * hold "follow the system", but nothing in the window showed which of the three
+ * was in force or offered the third one: a machine whose system theme is dark
+ * had no visible route to a light window.
+ */
+test('the theme button cycles through every theme and says what it will do', () => {
+  const source = fs.readFileSync(path.join(JS, 'main.js'), 'utf8');
+  assert.match(source, /const THEME_ORDER = \['dark', 'light', 'system'\]/);
+  assert.match(source, /role: 'theme'/, 'the button is drawn as a status item');
+  assert.match(source, /statusNodes\.theme\.textContent = t\('status\.theme'/, 'it names the current theme');
+  assert.match(source, /next: themeName\(nextTheme\(choice\)\)/, 'and the theme the next click gives');
+  assert.match(source, /case 'theme\.toggle':[\s\S]{0,120}cycleTheme\(\)/, 'the palette runs the same cycle');
+});

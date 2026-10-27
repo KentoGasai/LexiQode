@@ -39,8 +39,10 @@ function registerIpc({
   git,
   terminal,
   agent,
+  updates,
   watcher,
-  windowOf
+  windowOf,
+  quitForUpdate = () => {}
 }) {
   const handle = (channel, handler) => ipcMain.handle(channel, wrap(handler));
 
@@ -170,6 +172,27 @@ function registerIpc({
   handle(CHANNELS.settings.get, () => settings.get());
   handle(CHANNELS.settings.update, (event, patch) => settings.update(patch));
 
+  // --------------------------------------------------------------- updates
+  handle(CHANNELS.update.state, () => updates.snapshot());
+  handle(CHANNELS.update.check, (event, options) => updates.check(options || {}));
+  /**
+   * The download and the install both answer before they are finished, which is
+   * the point of them: the window shows progress from the pushed state and does
+   * not hold a request open for the length of a 150 MB download.
+   */
+  handle(CHANNELS.update.download, () => {
+    void updates.download().catch(() => {});
+    return { started: true };
+  });
+  handle(CHANNELS.update.install, async () => {
+    const state = await updates.install();
+    // The swap waits for this process to disappear, so leaving is the next step
+    // rather than an optional one. The delay lets this answer reach the window,
+    // so a failure to start the script is visible instead of a silent exit.
+    setTimeout(() => quitForUpdate(), 400);
+    return state;
+  });
+
   // ----------------------------------------------------------------- agent
   handle(CHANNELS.agent.status, () => agent.describe());
   handle(CHANNELS.agent.start, () => agent.ensureStarted());
@@ -199,6 +222,7 @@ function registerIpc({
    * one place and the window never has to know where a translation is stored.
    */
   handle(CHANNELS.app.i18n, () => payloadFor(settings.get().appearance.language, app.getLocale()));
+  handle(CHANNELS.app.dataFolder, () => app.getPath('userData'));
 
   handle(CHANNELS.shell.openExternal, (event, url) => {
     const target = String(url || '');

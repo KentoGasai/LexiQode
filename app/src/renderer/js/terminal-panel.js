@@ -192,6 +192,37 @@ export function createTerminalPanel({ api, bus, settings, onNotice }) {
     renderBody();
   }
 
+  /**
+   * Make sure a shell is running in the folder that is open now.
+   *
+   * A session belongs to the directory it was started in - `cd` inside it
+   * persists, which is the point of a persistent console - so after a folder
+   * change the old one is not moved or reused: it is closed, and a new shell is
+   * started where the user is actually working. Returns the session that is now
+   * current, or null when there is no folder to start one in.
+   */
+  async function openInFolder() {
+    const workspace = await api.workspace.current().catch(() => null);
+    if (!workspace) return null;
+    const stale = [...sessions.values()].filter((session) => session.root !== workspace.root);
+    for (const session of stale) {
+      await api.terminal.kill(session.id).catch(() => {});
+      session.observer?.disconnect();
+      session.term.dispose();
+      sessions.delete(session.id);
+    }
+    if (!sessions.size) {
+      await open();
+    } else {
+      if (!sessions.has(current)) current = [...sessions.keys()][sessions.size - 1];
+      renderTabs();
+      renderActions();
+      renderBody();
+    }
+    const session = sessions.get(current);
+    return session ? { id: session.id, title: session.title, root: session.root } : null;
+  }
+
   bus.on('terminal:data', (payload) => {
     if (!payload) return;
     const session = sessions.get(payload.id);
@@ -229,5 +260,5 @@ export function createTerminalPanel({ api, bus, settings, onNotice }) {
     input.focus();
   }
 
-  return { mount, unmount, open, focus, get count() { return sessions.size; } };
+  return { mount, unmount, open, openInFolder, focus, get count() { return sessions.size; } };
 }

@@ -16,6 +16,7 @@ import { createSearchPanel } from './search-panel.js';
 import { createGitPanel } from './git-panel.js';
 import { createTerminalPanel } from './terminal-panel.js';
 import { createChat } from './chat.js';
+import { createAppSettings } from './app-settings.js';
 import { rank } from './fuzzy.js';
 import { nextSize } from './split.js';
 import { agentStateKey, current as i18nInfo, initI18n, t } from './i18n.js';
@@ -45,6 +46,7 @@ let search = null;
 let git = null;
 let terminal = null;
 let chat = null;
+let appSettings = null;
 let currentActivity = 'explorer';
 
 const ACTIVITIES = [
@@ -219,6 +221,27 @@ function toggleChat(force) {
   if (settingsValue.layout.chatVisible) chat?.focus();
 }
 
+/**
+ * Open the folder in a shell, in the panel below.
+ *
+ * A folder is opened in order to work in it, and the next thing most people do
+ * is run something in it - so the shell is already there and already in the
+ * right directory instead of having to be found and pointed at it. The setting
+ * turns it off for anyone who wants the panel to stay as it was, and the session
+ * from the previous folder is closed rather than left pointing somewhere else.
+ */
+async function openFolderInTerminal(folder) {
+  if (!folder || !terminal || !settingsValue.terminal.openWithFolder) return;
+  if (!settingsValue.layout.panelVisible) {
+    settingsValue.layout.panelVisible = true;
+    persist({ layout: { panelVisible: true } });
+    applyAppearance();
+  }
+  terminal.mount();
+  const session = await terminal.openInFolder();
+  if (session) toast('info', t('toast.terminalOpened', { folder: folder.name || folder.root }));
+}
+
 // -------------------------------------------------------------- statusbar
 
 const gitInfo = { branch: '', ahead: 0, behind: 0, repo: false };
@@ -247,6 +270,11 @@ function renderStatusbar() {
     : t('status.noRepo');
 
   statusNodes = {
+    theme: statusItem('', {
+      title: t('status.themeTitle', { current: '', next: '' }),
+      role: 'theme',
+      onclick: () => void cycleTheme()
+    }),
     folder: statusItem(name, { title: workspace ? workspace.root : t('status.openFolder'), onclick: () => void openFolder() }),
     branch: statusItem(branchText, {
       title: t('status.branchTitle'),
@@ -265,6 +293,7 @@ function renderStatusbar() {
   };
 
   dom.statusbar.append(
+    statusNodes.theme,
     statusNodes.folder,
     statusNodes.branch,
     el('span', { class: 'statusbar__spacer' }),
@@ -273,9 +302,51 @@ function renderStatusbar() {
     statusNodes.cursor
   );
   updateCursor();
+  renderThemeStatus();
   // The bar is rebuilt from scratch on a workspace change, so the model and the
   // agent state are put back from what was last reported rather than reset.
   renderModelStatus(modelProfile);
+}
+
+/**
+ * The theme, at the left end of the status bar.
+ *
+ * One button with a three-state cycle, because a theme has three choices and a
+ * button has to be able to reach all of them: dark, light, and the system's own.
+ * The command palette runs the same cycle, so the two cannot disagree about what
+ * the current theme is. The title names what the next click will do, which is
+ * the only thing a button that changes something cannot show by itself.
+ */
+const THEME_ORDER = ['dark', 'light', 'system'];
+
+function themeName(choice) {
+  if (choice === 'light') return t('theme.light');
+  if (choice === 'system') return t('theme.system');
+  return t('theme.dark');
+}
+
+function nextTheme(choice) {
+  const index = THEME_ORDER.indexOf(choice);
+  return THEME_ORDER[(index + 1) % THEME_ORDER.length];
+}
+
+function renderThemeStatus() {
+  if (!statusNodes.theme) return;
+  const choice = settingsValue.appearance.theme;
+  statusNodes.theme.textContent = t('status.theme', { theme: themeName(choice) });
+  statusNodes.theme.title = t('status.themeTitle', {
+    current: themeName(choice),
+    next: themeName(nextTheme(choice))
+  });
+  statusNodes.theme.dataset.choice = choice;
+}
+
+function cycleTheme() {
+  const next = nextTheme(settingsValue.appearance.theme);
+  settingsValue.appearance.theme = next;
+  persist({ appearance: { theme: next } });
+  applyAppearance();
+  renderThemeStatus();
 }
 
 function updateCursor() {
@@ -346,6 +417,8 @@ const COMMANDS = [
   { id: 'chat.settings', key: 'cmd.agentSettings' },
   { id: 'chat.restart', key: 'cmd.restartAgent' },
   { id: 'git.refresh', key: 'cmd.gitRefresh' },
+  { id: 'settings.open', key: 'cmd.appSettings', hint: 'Ctrl+,' },
+  { id: 'update.check', key: 'cmd.checkUpdates' },
   { id: 'theme.toggle', key: 'cmd.switchTheme' },
   { id: 'language.change', key: 'cmd.switchLanguage' },
   { id: 'about', key: 'cmd.about' }
@@ -588,11 +661,17 @@ async function runCommand(name, argument) {
     case 'git.refresh':
       await refreshGit({ mount: true });
       break;
+    case 'settings.open':
+      appSettings?.toggle(true);
+      break;
+    case 'update.check':
+      // The menu item and the palette entry both land here: one place decides
+      // what "check for updates" does, including what it says when it finds
+      // nothing.
+      await appSettings?.checkUpdates({ force: true });
+      break;
     case 'theme.toggle': {
-      const next = dom.root.dataset.theme === 'dark' ? 'light' : 'dark';
-      settingsValue.appearance.theme = next;
-      persist({ appearance: { theme: next } });
-      applyAppearance();
+      cycleTheme();
       break;
     }
     case 'language.change': {
@@ -781,6 +860,11 @@ function wireKeys() {
     } else if (event.key === '`') {
       event.preventDefault();
       togglePanel();
+    } else if (event.key === ',') {
+      // The shortcut every editor uses for its settings, and the one the menu
+      // advertises for this dialog.
+      event.preventDefault();
+      appSettings?.toggle(true);
     }
   });
 
@@ -818,6 +902,9 @@ function wireEvents() {
     const languageChanged = value.appearance.language !== settingsValue.appearance.language;
     settingsValue = value;
     applyAppearance();
+    // The settings dialog draws from the file, so it follows a change made
+    // anywhere - including a control in the assistant's own sheet.
+    appSettings?.refresh();
     if (!languageChanged) return;
     // A language change redraws everything the window built itself: the static
     // markup is handled by `initI18n`, and these are the parts that were already
@@ -854,6 +941,7 @@ function wireEvents() {
       // conversation; redrawing it is what keeps the panel honest.
       await chat.reload();
       renderWelcome();
+      await openFolderInTerminal(workspace);
       persistSession();
     })();
   });
@@ -928,7 +1016,16 @@ async function boot() {
     api,
     activePath: '',
     onOpen: (path, options) => void editor.open(path, options),
-    onNotice: (message) => toast('info', message)
+    onNotice: (message) => toast('info', message),
+    // The tree is where a file is found, so it is also where one is put into the
+    // next message: the composer's own row only ever saw the editor's active tab,
+    // which is why a file could appear in the context with no way to take it out.
+    onToggleContext: (path) => {
+      chat?.toggleContextFile(path);
+      const attached = Boolean(chat && chat.hasContextFile(path));
+      toast('info', t(attached ? 'toast.contextAdded' : 'toast.contextRemoved', { path }));
+    },
+    isContextFile: (path) => Boolean(chat && chat.hasContextFile(path))
   });
   search = createSearchPanel({
     api,
@@ -957,6 +1054,12 @@ async function boot() {
     onNotice: (message, kind) => toast(kind || 'info', message),
     onProfile: (profile) => renderModelStatus(profile)
   });
+  appSettings = createAppSettings({
+    api,
+    settings,
+    onNotice: (message, kind) => toast(kind || 'info', message)
+  });
+  appSettings.mount();
 
   wireLayout();
   wireKeys();
@@ -980,6 +1083,7 @@ async function boot() {
     await refreshGit({ mount: true });
     await editor.restore(settingsValue.session);
     chat.renderContext();
+    await openFolderInTerminal(workspace);
   } else if (currentActivity === 'explorer') {
     // The explorer draws its own explanation, in the current language.
     await mountActivity();

@@ -82,6 +82,7 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
   const stopButton = document.getElementById('composer-stop');
   const modesHost = document.getElementById('composer-modes');
   const contextHost = document.getElementById('composer-context');
+  const modelHost = document.getElementById('composer-model');
   const dot = document.getElementById('chat-dot');
   const stateLabel = document.getElementById('chat-state');
   const actions = document.getElementById('chat-actions');
@@ -104,6 +105,14 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
     tools: new Map(),
     approvals: new Map(),
     context: null,
+    /** Files pinned to the next message, in the order they were added. */
+    contextFiles: [],
+    /** The open file the user took out of the message, by path. */
+    contextMuted: new Set(),
+    /** Model ids the endpoint last reported, and the profile they came from. */
+    models: [],
+    modelsFor: '',
+    modelsError: '',
     /** The "the conversation is empty" line, while it is on screen. */
     emptyState: null,
     settingsOpen: false,
@@ -884,17 +893,230 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
     input.focus();
   }
 
+  // --------------------------------------------------------------- the model
+
+  /**
+   * The model, beside the mode.
+   *
+   * The list is the endpoint's own, asked for once per profile: it is the same
+   * call the settings form makes, except that nothing has to be typed first,
+   * because here the credentials are already saved. A profile with no endpoint
+   * is not asked at all - the answer would be an error about a profile that is
+   * not configured, which is not worth showing next to a text field.
+   */
+  async function loadModels({ force = false } = {}) {
+    const profile = state.profile || {};
+    const signature = `${profile.id || ''}|${profile.base_url || ''}`;
+    if (!profile.base_url) {
+      state.models = [];
+      state.modelsFor = '';
+      state.modelsError = '';
+      renderModel();
+      return;
+    }
+    if (!force && signature === state.modelsFor) return;
+    state.modelsFor = signature;
+    state.modelsError = '';
+    renderModel();
+    try {
+      const result = await api.agent.models({ profile: profile.id });
+      const names = ((result && (result.models || result.data)) || []).map(String);
+      state.models = names.slice(0, 300);
+    } catch (error) {
+      state.models = [];
+      state.modelsError = error.message;
+    }
+    renderModel();
+  }
+
+  /**
+   * Draw the model chooser.
+   *
+   * The model in force is always in the list, whether the endpoint mentioned it
+   * or not: a chooser that cannot show what is being used is worse than none,
+   * and an endpoint that was reconfigured since the list was fetched would
+   * otherwise silently look like "no model".
+   */
+  function renderModel() {
+    if (!modelHost) return;
+    clear(modelHost);
+    const profile = state.profile || {};
+    const current = String(profile.model || '');
+    if (!current && !state.models.length) {
+      modelHost.append(
+        el('span', {
+          class: 'modelnone',
+          title: state.modelsError || t('chat.modelHint'),
+          text: t('chat.modelNone')
+        })
+      );
+      return;
+    }
+    const names = current && !state.models.includes(current) ? [current, ...state.models] : state.models;
+    const picker = el('select', {
+      class: 'modelbtn',
+      title: state.modelsError
+        ? t('chat.modelFailed', { model: current || t('chat.modelNone'), message: state.modelsError })
+        : t('chat.modelTitle', { model: current || t('chat.modelNone') }),
+      onchange: () => void chooseModel(picker.value)
+    });
+    for (const name of names) picker.append(el('option', { value: name, text: name }));
+    picker.value = current;
+    modelHost.append(picker);
+  }
+
+  /**
+   * Save the chosen model into the active profile.
+   *
+   * The core merges a profile patch into the profile it already has, so the
+   * endpoint, the key and the limits all survive; only the model is named here.
+   */
+  async function chooseModel(name) {
+    const profile = state.profile || {};
+    const model = String(name || '').trim();
+    if (!model || model === profile.model) return;
+    try {
+      await api.agent.saveProfile({
+        active_profile: profile.id,
+        profile: { id: profile.id, model: model }
+      });
+      toast('info', t('chat.modelChosen', { model: model }));
+      await loadState();
+    } catch (error) {
+      toast('error', error.message);
+      renderModel();
+    }
+  }
+
   // ----------------------------------------------------------- the composer
+
+  /** How many files may be pinned at once: a preamble, not a repository. */
+  const MAX_CONTEXT_FILES = 20;
+
+  function contextFiles() {
+    return state.contextFiles.slice();
+  }
+
+  /**
+   * Whether the next message will carry this file.
+   *
+   * Two ways in: a file the user pinned, and the file in the editor, which the
+   * preference offers by itself. Both are the same thing to whoever is looking
+   * at the row of chips, so the tree's menu asks this rather than "is it
+   * pinned" - otherwise it would say "remove" about a file it cannot remove.
+   */
+  function hasContextFile(path) {
+    if (state.contextFiles.includes(path)) return true;
+    const context = editor.context();
+    return Boolean(settings().agent.includeActiveFile) && context.file === path && !state.contextMuted.has(path);
+  }
+
+  function addContextFile(path) {
+    if (!path || state.contextFiles.includes(path)) return false;
+    if (state.contextFiles.length >= MAX_CONTEXT_FILES) {
+      toast('info', t('chat.contextFull', { count: MAX_CONTEXT_FILES }));
+      return false;
+    }
+    state.contextFiles.push(path);
+    // Pinning it again is the one way back from having dropped it.
+    state.contextMuted.delete(path);
+    renderContext();
+    return true;
+  }
+
+  function removeContextFile(path) {
+    const index = state.contextFiles.indexOf(path);
+    if (index === -1) return false;
+    state.contextFiles.splice(index, 1);
+    renderContext();
+    return true;
+  }
+
+  /**
+   * Pin a file or take it out: what the tree's own menu asks for.
+   *
+   * "Out" means out of the next message, which for the file in the editor is not
+   * the same as unpinning it: the preference would draw its chip again on the
+   * next redraw, and a menu item called "remove" that leaves the file in place
+   * is worse than no menu item at all.
+   */
+  function toggleContextFile(path) {
+    if (hasContextFile(path)) {
+      if (state.contextFiles.includes(path)) removeContextFile(path);
+      state.contextMuted.add(path);
+      renderContext();
+      return false;
+    }
+    return addContextFile(path);
+  }
+
+  /**
+   * What the next message carries.
+   *
+   * The open file is offered by preference, the pinned ones always, and a file
+   * the user took out stays out until it is pinned back - the previous version
+   * had no way to take one out at all, and a chip that returned on its own would
+   * be the same broken promise.
+   */
+  function messageContext() {
+    const context = editor.context();
+    const preferences = settings().agent;
+    const open =
+      preferences.includeActiveFile && context.file && !state.contextMuted.has(context.file) ? context.file : '';
+    return {
+      file: open,
+      files: contextFiles().filter((path) => path !== open),
+      dirty: open ? context.dirty : false,
+      language: context.language,
+      selection: preferences.includeSelection ? context.selection : '',
+      selectionRange: context.selectionRange
+    };
+  }
+
+  /** One file in the message, with the cross that takes it back out. */
+  function contextChip(path, labelKey, dropKey, onDrop) {
+    return el('span', { class: 'ctx', title: path }, [
+      el('span', { class: 'ctx__label', text: `${t(labelKey)} · ${path}` }),
+      el('button', {
+        class: 'ctx__drop',
+        type: 'button',
+        title: t(dropKey, { path: path }),
+        text: '×',
+        onclick: onDrop
+      })
+    ]);
+  }
 
   function renderContext() {
     const context = editor.context();
     const preferences = settings().agent;
     clear(contextHost);
-    if (preferences.includeActiveFile && context.file) {
+
+    const open =
+      preferences.includeActiveFile && context.file && !state.contextMuted.has(context.file) ? context.file : '';
+    if (open) {
+      contextHost.append(contextChip(open, 'chat.contextFile', 'chat.contextDropOpen', () => {
+        state.contextMuted.add(open);
+        renderContext();
+      }));
+    }
+    for (const path of state.contextFiles) {
+      if (path === open) continue;
       contextHost.append(
-        el('span', { class: 'ctx', title: t('chat.contextFile') }, [
-          el('span', { class: 'ctx__label', text: context.file })
-        ])
+        contextChip(path, 'chat.contextFilePinned', 'chat.contextDrop', () => void removeContextFile(path))
+      );
+    }
+    // The open file can also be pinned by hand, and only while it is not in the
+    // message already: a button that does nothing reads as broken.
+    if (context.file && !open && !state.contextFiles.includes(context.file)) {
+      contextHost.append(
+        el('button', {
+          class: 'ctx ctx--add',
+          type: 'button',
+          title: t('chat.contextAddOpen', { path: context.file }),
+          text: t('chat.contextAdd'),
+          onclick: () => void addContextFile(context.file)
+        })
       );
     }
     if (preferences.includeSelection && context.selection) {
@@ -903,7 +1125,7 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
         : t('chat.selectionChars', { count: context.selection.length });
       contextHost.append(el('span', { class: 'ctx' }, [el('span', { class: 'ctx__label', text: label })]));
     }
-    if (context.dirty) {
+    if (context.dirty && open) {
       contextHost.append(
         el('span', { class: 'ctx' }, [el('span', { class: 'ctx__label', text: t('chat.unsaved') })])
       );
@@ -959,8 +1181,7 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
   async function send() {
     const text = input.value.trim();
     if (!text || state.running) return;
-    const context = editor.context();
-    const preferences = settings().agent;
+    const context = messageContext();
     input.value = '';
     grow();
     addUser(text);
@@ -972,13 +1193,7 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
       await api.agent.send({
         message: text,
         mode: state.mode,
-        context: {
-          file: preferences.includeActiveFile ? context.file : '',
-          dirty: context.dirty,
-          language: context.language,
-          selection: preferences.includeSelection ? context.selection : '',
-          selectionRange: context.selectionRange
-        }
+        context
       });
     } catch (error) {
       state.running = false;
@@ -1153,6 +1368,11 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
           apiKey: apiKey.value.trim()
         });
         const names = (result && (result.models || result.data)) || [];
+        // The list the chooser beside the mode offers comes from here too: this
+        // is the one place that asks while credentials are still being typed,
+        // and the answer is the same list.
+        state.models = names.map(String).slice(0, 300);
+        renderModel();
         clear(models);
         if (!names.length) {
           models.append(el('span', { text: t('settings.scanNone') }));
@@ -1297,6 +1517,9 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
       // this is the only place that knows it: it used to say "no model chosen"
       // forever, whatever had been saved.
       onProfile?.(state.profile);
+      // The chooser beside the mode follows the profile: another endpoint is
+      // another list, and asking again for the same one is skipped.
+      void loadModels();
       state.agentSettings = snapshot.agent || {};
       // The core reports what its window looks like, so a window opened in the
       // middle of a long conversation draws the gauge before the next turn.
@@ -1453,6 +1676,7 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
     );
     applyStatus(await api.agent.status().catch(() => ({ state: 'stopped', detail: '' })));
     renderModes();
+    renderModel();
     renderContext();
     renderRunning();
     await loadState();
@@ -1483,10 +1707,30 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
     await loadState();
     await loadHistory();
     await restoreTabs();
+    renderModel();
     renderContext();
     renderRunning();
     grow();
   }
 
-  return { mount, send, cancel, reset, reload, toggleSettings, renderContext, focus: () => input.focus(), state };
+  return {
+    mount,
+    send,
+    cancel,
+    reset,
+    reload,
+    toggleSettings,
+    renderContext,
+    focus: () => input.focus(),
+    // The message's own context, for the tree's menu: a file can be pinned
+    // where it is found instead of only from the composer's own row.
+    contextFiles,
+    hasContextFile,
+    addContextFile,
+    removeContextFile,
+    toggleContextFile,
+    loadModels,
+    renderModel,
+    state
+  };
 }

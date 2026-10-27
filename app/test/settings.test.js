@@ -88,3 +88,20 @@ test('sanitise never returns a shared reference to the defaults', () => {
   const two = sanitise(loadSettings({}));
   assert.equal(two.files.exclude.includes('**/tmp/**'), false);
 });
+
+test('a shell opens with the folder unless it is told not to', () => {
+  assert.equal(loadSettings({}).terminal.openWithFolder, true);
+  assert.equal(loadSettings({ terminal: { openWithFolder: 'false' } }).terminal.openWithFolder, false);
+  // "no" is not a boolean and is not the string `false`, so the default stands:
+  // a hand-edited file can turn this off, but not by accident.
+  assert.equal(loadSettings({ terminal: { openWithFolder: 'no' } }).terminal.openWithFolder, true);
+});
+
+test('the update settings keep a repository only when it is one', () => {
+  assert.equal(loadSettings({}).updates.checkOnStart, true);
+  assert.equal(loadSettings({ updates: { checkOnStart: 'false' } }).updates.checkOnStart, false);
+  assert.equal(loadSettings({ updates: { includePrereleases: 'true' } }).updates.includePrereleases, true);
+  assert.equal(loadSettings({ updates: { repo: 'owner/name' } }).updates.repo, 'owner/name');
+  assert.equal(loadSettings({ updates: { repo: 'a/b/c' } }).updates.repo, '');
+  assert.equal(loadSettings({ updates: { repo: 'https://github.com/owner/name' } }).updates.repo, '');
+});

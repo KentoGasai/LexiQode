@@ -113,6 +113,16 @@ function sanitise(settings) {
 
   result.terminal.fontSize = clampNumber(result.terminal.fontSize, 8, 32, DEFAULTS.terminal.fontSize);
   result.terminal.shell = typeof result.terminal.shell === 'string' ? result.terminal.shell : '';
+  result.terminal.openWithFolder = Boolean(result.terminal.openWithFolder);
+
+  result.updates.checkOnStart = Boolean(result.updates.checkOnStart);
+  result.updates.includePrereleases = Boolean(result.updates.includePrereleases);
+  // Only `owner/name`, which is what the release API takes. Anything else is
+  // dropped rather than sent, because a typo would otherwise produce a request
+  // to a repository that does not exist and look like "no updates".
+  result.updates.repo = /^[\w.-]+\/[\w.-]+$/.test(String(result.updates.repo))
+    ? String(result.updates.repo)
+    : '';
 
   if (!Array.isArray(result.recent)) result.recent = [];
   result.recent = result.recent

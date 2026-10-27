@@ -43,15 +43,18 @@ on one line, and how much of the model's window is in use under the composer.*
 | Area | What it does |
 |---|---|
 | Editor | Monaco: syntax highlighting, tabs, unsaved-change marker, find in file, line endings preserved as they were |
-| Explorer | file tree that follows the disk by itself, right-click menu on a file and on a folder, create, rename, delete to the recycle bin, reveal in Explorer, copy path |
+| Explorer | file tree that follows the disk by itself, right-click menu on a file and on a folder, add a file to the assistant's context, create, rename, delete to the recycle bin, reveal in Explorer, copy path |
 | Navigation | go to file with `Ctrl+P` using fuzzy matching, command palette |
 | Search | find in files with streaming results and cancellation |
 | Source control | git: staged and unstaged separated, diffs, stage, unstage, discard, commit, branch switching |
-| Terminal | a real PowerShell session in the bottom panel, colours, working directory preserved |
-| Assistant | streaming answers, reasoning folded into a "Thinking…" line above the answer, one line of tools per turn (arguments and results one click away), a context gauge and automatic compaction, approvals, cancel |
+| Terminal | a real PowerShell session in the bottom panel, colours, working directory preserved; it opens by itself in the folder that was just opened |
+| Assistant | the model chosen beside the mode button, streaming answers, reasoning folded into a "Thinking…" line above the answer, one line of tools per turn (arguments and results one click away), a context gauge and automatic compaction, approvals, cancel |
+| Message context | every file the next message will carry is a chip with a cross: add one from the tree or from the open file, take it out, put it back |
 | Chats | every conversation is saved on disk on its own and opens in a tab: a new chat does not erase the previous one, a saved chat can be reopened from the list, and each can be renamed or deleted |
 | Modes | Agent, Ask, Plan, Debug, Review - what the next message is allowed to do |
-| Interface | resizable and restorable layout, dark and light themes (from the settings and the command palette), Russian and English |
+| Interface | resizable and restorable layout, dark and light themes (a button in the bottom-left corner, the command palette, the settings), Russian and English |
+| Settings | a window on `Ctrl+,`: appearance, editor, layout, files, terminal, assistant defaults, updates, and the version |
+| Updates | a newer release is looked for on GitHub at start and on demand, downloaded and installed over the current version |
 
 ## Requirements
 
@@ -173,7 +176,37 @@ removed from the schemas and refused by the tool registry.
 | `Ctrl+L` | focus the assistant input |
 | `Ctrl+Shift+E` / `Ctrl+Shift+G` | explorer / source control |
 | `Ctrl+K Ctrl+O` | open a folder |
+| `Ctrl+,` | the application's settings |
 | `Esc` | close a list or the palette |
+
+## Settings and updates
+
+The window's settings open with `Ctrl+,`, from File ▸ Settings…, or from the
+command palette. Everything in them applies as it is changed: the controls write
+through the same settings file the window reads, so the form never becomes a
+second source of truth. The agent's own settings (endpoint, key, model, limits)
+stay in the assistant panel's sheet.
+
+The theme button sits in the bottom-left corner of the status bar. It cycles dark,
+light and "follow the system", and its tooltip says what the next click will do.
+
+Releases are read from GitHub: at start, if that is switched on, and on demand
+from Help ▸ Check for Updates…. A newer release is offered with its notes and a
+Download button; once the archive is downloaded, "Close and install" replaces the
+application. That last step is arranged so that it cannot fight the running app:
+
+1. the archive is downloaded into `%APPDATA%\LexiQode\updates` and unpacked whole;
+2. the application closes;
+3. a separate script, `apply-update.ps1`, waits for the process to disappear,
+   moves the current folder aside, unpacks the new version into the same place,
+   starts it and removes the old folder;
+4. if any step fails, the previous version is moved back and started again - the
+   application is never left half-replaced. Every step is appended to
+   `%APPDATA%\LexiQode\updates\update.log`.
+
+Settings and per-machine data are never touched: they live outside the application
+folder. A build started from source refuses to replace itself and points at the
+release page instead.
 
 ## Interface language
 
@@ -197,8 +230,17 @@ and refuses to let them drift apart.
   JavaScript, JSON, CSS and HTML, and syntax highlighting, bracket matching and
   folding for everything else.
 * **One folder per window.**
-* **No telemetry.** The window has no network access at all; only the core uses the
-  network, and only to reach the endpoint you configured.
+* **No telemetry.** The page itself has no network access at all. Only the core
+  (to reach the endpoint you configured) and the update check use the network -
+  the latter asks GitHub for releases from the main process, and can be switched
+  off in the settings.
+* **An update replaces the application folder.** The portable build updates in
+  place: the archive is unpacked over the current folder by a separate script that
+  runs once the application has closed. Files you put in the application folder
+  yourself do not survive that; your settings and data live outside it.
+* **A build from source does not update itself.** It is pointed at the release
+  page instead, because overwriting the repository it was started from would be a
+  strange thing for it to do.
 * Messages that originate in the core are printed as the core phrased them.
 * Only Windows is supported.
 
@@ -235,7 +277,7 @@ cd core;  python -m pytest tests -q
 cd app;   npm test
 ```
 
-Six scripts start the application and interrogate it from outside. All of them run
+Eight scripts start the application and interrogate it from outside. All of them run
 with an isolated configuration, so they can be started while the application is
 open and never touch your own files:
 
@@ -245,6 +287,8 @@ open and never touch your own files:
 | `probe-interactions.cjs` | the panels with no folder open, dragging boundaries, saving by keyboard |
 | `probe-chat-window.cjs` | the assistant through the window: settings, model choice, an answer, reasoning, tools, chat tabs |
 | `probe-explorer-live.cjs` | the tree follows the disk; right-click on a file and on empty space |
+| `probe-editor-colors.cjs` | seven kinds of file open with their own language and with colours: it checks the language id and counts the token colours |
+| `probe-app-features.cjs` | the shell opens with the folder, the model beside the mode, a file leaving the message and coming back, the theme button, the settings window and its write path, and what the update check reports |
 | `probe-chat.cjs` | the core end to end, through a stub OpenAI-compatible server |
 | `capture-screenshots.cjs` | takes the screenshots for this README (above) |
 

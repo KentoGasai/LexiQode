@@ -5,6 +5,11 @@
   "private": true,
   "description": "LexiQode - an AI IDE on your own OpenAI-compatible endpoint",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/KentoGasai/LexiQode2.git"
+  },
+  "homepage": "https://github.com/KentoGasai/LexiQode2",
   "main": "src/main/main.js",
   "scripts": {
     "start": "electron .",

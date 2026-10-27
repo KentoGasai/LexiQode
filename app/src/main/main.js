@@ -9,7 +9,7 @@
  * renderer receives everything through the one preload surface it was given.
  */
 
-const { app, BrowserWindow, Menu, nativeTheme, shell, dialog, clipboard } = require('electron');
+const { app, BrowserWindow, Menu, nativeTheme, net, shell, dialog, clipboard } = require('electron');
 const path = require('node:path');
 
 const { CHANNELS, PRODUCT } = require('../shared/constants');
@@ -24,6 +24,9 @@ const { GitService } = require('./git-service');
 const { TerminalService } = require('./terminal-service');
 const { AgentService } = require('./agent/service');
 const { createWorkspaceWatcher, ignoreFactory } = require('./workspace-watcher');
+const { UpdateService, githubSlug } = require('./update-service');
+
+const PACKAGE = require('../../package.json');
 
 // Must happen before the app is ready; afterwards Electron ignores it.
 registerScheme();
@@ -123,7 +126,30 @@ function buildServices() {
   // filter is built from that list.
   settings.onChange((value) => watcher.setIgnore(ignoreFactory(value.files ? value.files.exclude : [])));
 
-  services = { settings, workspace, search, git, terminal, agent, watcher, send };
+  /**
+   * Updates, from the releases published on GitHub.
+   *
+   * The repository is read from this package's own `repository` field, so a fork
+   * checks its own releases without touching the code; a user can point it
+   * somewhere else in the settings, which is also what makes the check testable.
+   *
+   * `net.fetch` is used rather than the global one because it follows the
+   * machine's proxy settings, which is the difference between an update check
+   * that works on a corporate network and one that silently never answers.
+   */
+  const updates = new UpdateService({
+    settings,
+    currentVersion: app.getVersion(),
+    repository: githubSlug(PACKAGE.repository && (PACKAGE.repository.url || PACKAGE.repository)),
+    packaged: app.isPackaged,
+    installDir: path.dirname(app.getPath('exe')),
+    dataDir: path.join(app.getPath('userData'), 'updates'),
+    fetchImpl: (url, options) => net.fetch(url, options),
+    onState: (state) => send(CHANNELS.update.progress, state),
+    onLog: (line) => console.log(line)
+  });
+
+  services = { settings, workspace, search, git, terminal, agent, updates, watcher, send };
   return services;
 }
 
@@ -169,6 +195,8 @@ const MENU_LABELS = {
   'Agent Settings…': 'menu.agentSettings',
   'Restart Agent': 'menu.restartAgent',
   'About LexiQode': 'menu.about',
+  'Settings…': 'menu.settings',
+  'Check for Updates…': 'menu.checkUpdates',
   'Open Settings File': 'menu.settingsFile',
   'Open Data Folder': 'menu.dataFolder'
 };
@@ -201,6 +229,8 @@ function buildMenu() {
         { label: 'Close Editor', accelerator: 'CmdOrCtrl+W', click: () => sendCommand('file.close') },
         { type: 'separator' },
         { label: 'Close Folder', click: () => sendCommand('workspace.close') },
+        { type: 'separator' },
+        { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: () => sendCommand('settings.open') },
         { type: 'separator' },
         { label: 'Exit', role: 'quit' }
       ]
@@ -258,6 +288,8 @@ function buildMenu() {
     {
       label: 'Help',
       submenu: [
+        { label: 'Check for Updates…', click: () => sendCommand('update.check') },
+        { type: 'separator' },
         { label: `About ${PRODUCT}`, click: () => sendCommand('about') },
         { label: 'Open Settings File', click: () => shell.openPath(settingsFile()) },
         { label: 'Open Data Folder', click: () => shell.openPath(userDataDir()) }
@@ -299,7 +331,7 @@ function createWindow() {
   assertAssetsPresent(roots);
   handleRequests(roots);
 
-  const { workspace, search, git, terminal, agent } = services;
+  const { workspace, search, git, terminal, agent, updates } = services;
   registerIpc({
     ipcMain: require('electron').ipcMain,
     app,
@@ -312,8 +344,16 @@ function createWindow() {
     git,
     terminal,
     agent,
+    updates,
     watcher: services.watcher,
-    windowOf: () => mainWindow
+    windowOf: () => mainWindow,
+    /**
+     * Leaving for an update is the ordinary shutdown: the agent is stopped and
+     * the shells are closed by the `before-quit` handler, which is exactly what
+     * the swap script is waiting for. It waits on this process id, so the update
+     * cannot begin while the app is alive.
+     */
+    quitForUpdate: () => app.quit()
   });
 
   mainWindow.on('maximize', () => services.send(CHANNELS.window.state, { maximized: true }));
@@ -381,6 +421,17 @@ if (!app.requestSingleInstanceLock()) {
       if (workspace.current()) services.watcher.watch(workspace.current().root);
     }
     createWindow();
+    /**
+     * A check on start, after the window is drawn.
+     *
+     * Delayed rather than awaited: a network that is slow, blocked or absent
+     * must not be part of how long the window takes to appear. The answer is
+     * pushed to the window when it arrives, and the window asks for the state
+     * when it boots, so a check that finished first is not lost.
+     */
+    if (settings.get().updates.checkOnStart) {
+      setTimeout(() => void services.updates.check().catch(() => {}), 3000);
+    }
     // The core is created for one folder; without one it would run in whatever
     // directory the window was launched from.
     if (settings.get().agent.autoStart && workspace.current()) {

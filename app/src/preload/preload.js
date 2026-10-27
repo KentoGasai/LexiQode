@@ -32,7 +32,8 @@ const EVENTS = [
   CHANNELS.terminal.exit,
   CHANNELS.agent.event,
   CHANNELS.agent.statusChanged,
-  CHANNELS.app.command
+  CHANNELS.app.command,
+  CHANNELS.update.progress
 ];
 
 async function call(channel, ...args) {
@@ -105,8 +106,15 @@ const api = {
     get: () => call(CHANNELS.settings.get),
     update: (patch) => call(CHANNELS.settings.update, patch)
   },
+  update: {
+    state: () => call(CHANNELS.update.state),
+    check: (options) => call(CHANNELS.update.check, options || {}),
+    download: () => call(CHANNELS.update.download),
+    install: () => call(CHANNELS.update.install)
+  },
   app: {
-    i18n: () => call(CHANNELS.app.i18n)
+    i18n: () => call(CHANNELS.app.i18n),
+    dataFolder: () => call(CHANNELS.app.dataFolder)
   },
   agent: {
     status: () => call(CHANNELS.agent.status),

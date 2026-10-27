@@ -33,12 +33,25 @@ const EVENT_TYPES = [
  * the core already accepts a message, and the panel is the only thing that has
  * to know how a selection is phrased. The file is named by its relative path,
  * which is what the agent's own tools understand.
+ *
+ * Files the user pinned are named and not read. The agent has tools for reading
+ * a file, and pasting contents into every message would spend the model's window
+ * on what a turn may never need.
  */
 function buildContextPreamble(context) {
   if (!context) return '';
   const parts = [];
   if (context.file) {
     parts.push(`- open file: ${context.file}${context.dirty ? ' (unsaved changes)' : ''}`);
+  }
+  if (Array.isArray(context.files)) {
+    // The panel caps this list already; the cap is repeated here because a
+    // preamble is built from whatever arrives, and an unbounded list would be
+    // paid for by every turn of the conversation.
+    const pinned = [...new Set(context.files)]
+      .filter((path) => typeof path === 'string' && path.trim())
+      .slice(0, 40);
+    if (pinned.length) parts.push(`- files the user put in context: ${pinned.join(', ')}`);
   }
   if (typeof context.selection === 'string' && context.selection.trim()) {
     const lines = context.selectionRange

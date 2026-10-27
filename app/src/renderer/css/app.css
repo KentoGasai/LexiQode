@@ -1364,6 +1364,48 @@ kbd {
   white-space: nowrap;
 }
 
+/*
+ * Taking a file back out of the message.
+ *
+ * The chip says which file the next message will carry, so it has to be the
+ * place the file is taken out: the file that used to appear here on its own had
+ * no such control, and a context a user cannot edit is a context they stop
+ * trusting.
+ */
+.ctx__drop {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.ctx__drop:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.ctx--add {
+  border-style: dashed;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+}
+
+.ctx--add:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
 /* How full the model's window is: the one number that explains a compaction. */
 .ctx--meter {
   font-variant-numeric: tabular-nums;
@@ -1686,6 +1728,57 @@ kbd {
   color: inherit;
 }
 
+/*
+ * The model, beside the mode button.
+ *
+ * Same height and radius as the mode button, because they sit on one line and
+ * reading them as two halves of the same decision is the point. The width is
+ * bounded: a model id can be long, and the composer must not be pushed sideways
+ * by one.
+ */
+.modelhost {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 210px;
+}
+
+.modelbtn {
+  max-width: 100%;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 13px;
+  background: var(--surface-2);
+  color: var(--text-dim);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.modelbtn:hover {
+  border-color: var(--accent);
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.modelnone {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 13px;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.modelnone:hover {
+  border-color: var(--accent);
+  color: var(--text-dim);
+}
+
 .chat__state {
   flex: 0 1 auto;
   min-width: 0;
@@ -1756,6 +1849,30 @@ kbd {
 
 .statusbar__item[data-missing="true"] {
   color: var(--warn, var(--text-faint));
+}
+
+/*
+ * The theme button, at the left end of the status bar.
+ *
+ * It is drawn like the other items and marked out by a dashed edge, because it
+ * is the one item on the bar that changes something: everything else there
+ * reports. The corner is deliberate - it stays put when panels are toggled, so
+ * it is the one control always in the same place.
+ */
+.statusbar__item[data-role="theme"] {
+  padding: 0 6px;
+  border: 1px dashed transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.statusbar__item[data-role="theme"]:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.statusbar__item[data-role="theme"][data-choice="system"] {
+  color: var(--text-faint);
 }
 
 .statusbar__spacer {
@@ -1841,6 +1958,187 @@ kbd {
   color: var(--text-faint);
   font-size: 11px;
   white-space: nowrap;
+}
+
+/* ----------------------------------------------------- application settings */
+
+/*
+ * The settings window.
+ *
+ * Same shell as the palette - a panel over a dimmed screen - because it is the
+ * same kind of thing: a surface that takes the keyboard for a moment and then
+ * gives it back. The body scrolls rather than the page, so the title and the
+ * close button stay where they are while a long list of settings goes past.
+ */
+.settings {
+  display: flex;
+  flex-direction: column;
+  width: min(760px, 94vw);
+  max-height: 78vh;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.settings--narrow {
+  width: min(560px, 92vw);
+}
+
+.settings__head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings__title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.settings__head-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 0 10px;
+}
+
+.settings__group {
+  display: grid;
+  gap: 8px;
+  padding: 10px 14px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings__group > h3 {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.settings__row {
+  display: grid;
+  grid-template-columns: minmax(120px, 200px) minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.settings__label {
+  color: var(--text-dim);
+  font-size: 11.5px;
+}
+
+.settings__value {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.settings__row input[type="text"],
+.settings__row input[type="number"],
+.settings__row select,
+.settings__row textarea {
+  width: 100%;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  outline: none;
+}
+
+.settings__row textarea {
+  height: auto;
+  min-height: 64px;
+  padding: 6px 8px;
+  font-family: var(--mono);
+  font-size: 12px;
+  resize: vertical;
+}
+
+.settings__row input:focus,
+.settings__row select:focus,
+.settings__row textarea:focus {
+  border-color: var(--accent);
+}
+
+.settings__hint,
+.settings__note {
+  color: var(--text-dim);
+  font-size: 11.5px;
+}
+
+.settings__hint {
+  color: var(--text-faint);
+}
+
+.settings__check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim);
+  font-size: 11.5px;
+}
+
+.settings__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings__update {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.settings__progress {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.settings__progress > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s linear;
+}
+
+/* Release notes are text from GitHub: shown as it is, never as markup. */
+.update__notes {
+  max-height: 240px;
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 /* ----------------------------------------------------------------- toasts */

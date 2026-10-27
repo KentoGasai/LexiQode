@@ -80,6 +80,20 @@ const CHANNELS = {
     update: 'settings:update',
     changed: 'settings:changed'
   },
+  /**
+   * Updates, from the releases published on GitHub.
+   *
+   * The window asks; the main process does the talking, because the window is
+   * not allowed to reach the network at all and because the download has to
+   * outlive the window's own request.
+   */
+  update: {
+    state: 'update:state',
+    check: 'update:check',
+    download: 'update:download',
+    install: 'update:install',
+    progress: 'update:progress'
+  },
   agent: {
     status: 'agent:status',
     start: 'agent:start',
@@ -114,7 +128,18 @@ const CHANNELS = {
     write: 'clipboard:write'
   },
   /** Main-process to renderer: menu items and keyboard accelerators arrive here. */
-  app: { command: 'app:command', i18n: 'app:i18n' }
+  app: {
+    command: 'app:command',
+    i18n: 'app:i18n',
+    /**
+     * Where this app keeps its own state.
+     *
+     * Asked for rather than assumed: the window is not told any paths, and a
+     * window that a user can point at a folder by hand is a window that can be
+     * made to open one.
+     */
+    dataFolder: 'app:data-folder'
+  }
 };
 
 /** Agent modes before the core has answered. The core is the authority. */
@@ -180,13 +205,33 @@ const DEFAULTS = {
     maxSearchResults: 2000,
     maxFileSizeKb: 2048
   },
-  terminal: { shell: '', fontSize: 13 },
+  terminal: {
+    shell: '',
+    fontSize: 13,
+    /**
+     * Whether opening a folder opens a shell in it, in the panel below.
+     *
+     * On by default because that is what a folder is opened for: the next thing
+     * most people do with it is run something in it, and a terminal that has to
+     * be found and pointed at the right directory first is a small tax paid on
+     * every folder.
+     */
+    openWithFolder: true
+  },
   agent: {
     autoStart: true,
     defaultMode: 'agent',
     includeActiveFile: true,
     includeSelection: true
   },
+  /**
+   * Looking for a newer release.
+   *
+   * `repo` empty means the repository named in the application's own
+   * `package.json`, so a fork that changes nothing else still checks its own
+   * releases.
+   */
+  updates: { checkOnStart: true, repo: '', includePrereleases: false },
   recent: [],
   /**
    * What to restore on the next start. `chats` and `activeChat` are the open
