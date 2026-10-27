@@ -247,8 +247,8 @@ and refuses to let them drift apart.
 ## Building from source
 
 ```powershell
-git clone https://github.com/KentoGasai/LexiQode2.git
-cd LexiQode2\app
+git clone https://github.com/KentoGasai/LexiQode.git
+cd LexiQode\app
 npm install
 node node_modules\electron\install.js
 cd ..

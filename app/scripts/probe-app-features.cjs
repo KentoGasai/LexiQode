@@ -199,10 +199,13 @@ async function main() {
     if (!condition) failures.push(message);
   };
   const session = report && report.terminal && report.terminal.sessions ? report.terminal.sessions[0] : null;
+  // The folder the probe was pointed at, whatever it is called: a probe that
+  // hard-codes a directory name breaks the day somebody renames it.
+  const expectedFolder = path.basename(WORKSPACE);
   expect(report && report.terminal.panelVisible, 'the panel did not open with the folder');
   expect(session && /powershell/i.test(session.shell), 'no PowerShell session was started for the folder');
   expect(
-    session && session.cwd && session.cwd.replace(/\\/g, '/').endsWith('LexiQode2'),
+    session && session.cwd && session.cwd.replace(/\\/g, '/').endsWith(expectedFolder),
     `the shell is not in the opened folder (${session ? session.cwd : 'no session'})`
   );
   expect(report && report.composer.immediatelyAfterTheMode, 'the model control is not next to the mode button');

@@ -110,10 +110,10 @@ test('versions are compared by number, not as text', () => {
 });
 
 test('a repository is read out of every shape a package declares it in', () => {
-  assert.equal(githubSlug('https://github.com/KentoGasai/LexiQode2.git'), 'KentoGasai/LexiQode2');
-  assert.equal(githubSlug('git+https://github.com/KentoGasai/LexiQode2.git'), 'KentoGasai/LexiQode2');
-  assert.equal(githubSlug('https://github.com/KentoGasai/LexiQode2'), 'KentoGasai/LexiQode2');
-  assert.equal(githubSlug('KentoGasai/LexiQode2'), 'KentoGasai/LexiQode2');
+  assert.equal(githubSlug('https://github.com/KentoGasai/LexiQode.git'), 'KentoGasai/LexiQode');
+  assert.equal(githubSlug('git+https://github.com/KentoGasai/LexiQode.git'), 'KentoGasai/LexiQode');
+  assert.equal(githubSlug('https://github.com/KentoGasai/LexiQode'), 'KentoGasai/LexiQode');
+  assert.equal(githubSlug('KentoGasai/LexiQode'), 'KentoGasai/LexiQode');
   assert.equal(githubSlug('https://example.com/not/github'), '');
   assert.equal(githubSlug(''), '');
   assert.equal(githubSlug(undefined), '');

@@ -94,7 +94,7 @@ With the GitHub CLI (not installed on this machine - `winget install GitHub.cli`
 then `gh auth login`):
 
 ```powershell
-gh repo edit KentoGasai/LexiQode2 --visibility public --accept-visibility-change-consequences
+gh repo edit KentoGasai/LexiQode --visibility public --accept-visibility-change-consequences
 ```
 
 GitHub reports that this repository has moved to `KentoGasai/LexiQode`. Either
@@ -117,7 +117,7 @@ something a repository can set up for itself.
   monaco-editor, self-hosted, local-first, privacy, ollama, python
   ```
 
-  `gh repo edit KentoGasai/LexiQode2 --add-topic ai --add-topic ai-ide ...`
+  `gh repo edit KentoGasai/LexiQode --add-topic ai --add-topic ai-ide ...`
 * **Description** - one sentence, the words a person would search for:
   *"A Windows AI IDE with a built-in agent that runs on your own OpenAI-compatible endpoint - local-first, no account, no telemetry."*
 * **Social preview** - the image GitHub shows when the link is pasted anywhere.

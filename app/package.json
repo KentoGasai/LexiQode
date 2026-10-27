@@ -7,9 +7,9 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/KentoGasai/LexiQode2.git"
+    "url": "https://github.com/KentoGasai/LexiQode.git"
   },
-  "homepage": "https://github.com/KentoGasai/LexiQode2",
+  "homepage": "https://github.com/KentoGasai/LexiQode",
   "main": "src/main/main.js",
   "scripts": {
     "start": "electron .",
