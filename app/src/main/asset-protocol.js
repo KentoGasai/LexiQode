@@ -44,7 +44,25 @@ function registerScheme() {
   protocol.registerSchemesAsPrivileged([
     {
       scheme: SCHEME,
-      privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true }
+      /**
+       * `corsEnabled` is what makes workers work.
+       *
+       * Monaco 0.57 starts a language service by wrapping its worker in a
+       * `blob:` and `importScripts` the real file. That request comes from the
+       * blob worker's own origin, and without CORS on this scheme Chromium
+       * refuses it - "the script at app://lexiqode/vendor/monaco/vs/assets/
+       * editor.worker-….js failed to load" - so the service never starts. It was
+       * intermittent rather than constant, which is how it went unnoticed: two
+       * runs of `scripts/probe-editor-suggest.cjs` produced JavaScript
+       * suggestions and the third produced none.
+       */
+      /**
+       * No `stream`: every file is read whole and answered in one piece, and the
+       * flag only invited a chunked reply that a worker's load could be cut
+       * short on. Measured - `scripts/probe-editor-suggest.cjs` - because a
+       * worker that fails to load says nothing in the window.
+       */
+      privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true }
     }
   ]);
 }
@@ -98,6 +116,10 @@ function handleRequests(roots) {
         status: 200,
         headers: {
           'content-type': mimeFor(file),
+          // The window and the workers it starts are the same application; a
+          // blob worker's origin is opaque, so it has to be told that reading
+          // this scheme is allowed.
+          'access-control-allow-origin': '*',
           'cache-control': requested.startsWith('/vendor/') ? 'public, max-age=604800' : 'no-store'
         }
       });

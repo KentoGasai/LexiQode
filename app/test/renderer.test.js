@@ -185,6 +185,49 @@ test('the message context can be edited from both ends', () => {
 });
 
 /**
+ * Opening a file must not put it into the next message.
+ *
+ * The first version did: a preference offered the file in the editor by itself,
+ * so somebody who opened a file to read it had to notice a chip and take it back
+ * out before the message said what they had actually asked. The preference and
+ * the machinery that kept a file out of the message are both gone; what remains
+ * is one list that only the user writes to.
+ */
+test('a file enters the message only when the user puts it there', () => {
+  const chat = fs.readFileSync(path.join(JS, 'chat.js'), 'utf8');
+  assert.doesNotMatch(chat, /includeActiveFile/, 'the open file is offered by a preference again');
+  assert.doesNotMatch(chat, /contextMuted/, 'a file taken out of the message is still remembered as muted');
+  assert.match(chat, /function hasContextFile\(path\) \{\s*return state\.contextFiles\.includes\(path\);/);
+  assert.match(chat, /file: '',\s*files: contextFiles\(\)/, 'the message should carry the pinned files and no open file');
+  const settings = fs.readFileSync(path.join(APP, 'src', 'shared', 'constants.js'), 'utf8');
+  assert.doesNotMatch(settings, /includeActiveFile/, 'the setting for the automatic file is still in the defaults');
+});
+
+/**
+ * Running a file: a button, a command, and a shell to run it in.
+ *
+ * The button is the part that has to exist in the markup, the folder is what the
+ * command has to move to first, and the panel has to be open before the command
+ * is sent or the output lands somewhere nobody can see.
+ */
+test('the editor has a run button, and it runs the file in the shell', () => {
+  const renderer = fs.readFileSync(path.join(JS, 'main.js'), 'utf8');
+  assert.match(html, /id="editor-actions"/, 'index.html should have a place for the run button');
+  assert.match(html, /id="editor-actions"[\s\S]{0,400}id="editor"/, 'the run button belongs above the editor');
+  assert.match(renderer, /function renderEditorActions\(/, 'the button should be drawn by the window');
+  assert.match(renderer, /class: 'iconbtn runbtn'/, 'the run button has a class of its own to be styled');
+  assert.match(renderer, /icon: 'play'|icon\('play'\)/, 'the run button should use the play icon');
+  assert.match(renderer, /case 'file\.run':[\s\S]{0,200}runActiveFile\(\)/, 'the palette and the menu should reach the same command');
+  assert.match(renderer, /togglePanel\(true\);\s*terminal\.mount\(\);/, 'the panel must be open before the output arrives');
+  assert.match(renderer, /await editor\.save\(file, \{ quiet: true \}\)/, 'the file must be saved before it is run');
+  assert.match(renderer, /import \{ commandFor \} from '\.\/run\.js'/, 'the command comes from the shared module');
+  const css = fs.readFileSync(path.join(RENDERER, 'css', 'app.css'), 'utf8');
+  assert.match(css, /\.editorhead__actions/, 'the run button needs a box that does not disturb the tabs');
+  const ui = fs.readFileSync(path.join(JS, 'ui.js'), 'utf8');
+  assert.match(ui, /play: '<svg/, 'the icon set has no play icon');
+});
+
+/**
  * The theme has a button, and the button reaches all three of its states.
  *
  * The palette could switch between dark and light, and the settings file could

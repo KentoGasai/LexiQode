@@ -105,10 +105,15 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
     tools: new Map(),
     approvals: new Map(),
     context: null,
-    /** Files pinned to the next message, in the order they were added. */
+    /**
+     * The files the next message will carry, in the order they were added.
+     *
+     * This is the whole of the context: nothing is added to it by opening a file.
+     * The first version offered the file in the editor by itself, which meant a
+     * person who opened a file to read it had to notice a chip and take it back
+     * out before the message was honest about what they had asked.
+     */
     contextFiles: [],
-    /** The open file the user took out of the message, by path. */
-    contextMuted: new Set(),
     /** Model ids the endpoint last reported, and the profile they came from. */
     models: [],
     modelsFor: '',
@@ -1025,15 +1030,13 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
   /**
    * Whether the next message will carry this file.
    *
-   * Two ways in: a file the user pinned, and the file in the editor, which the
-   * preference offers by itself. Both are the same thing to whoever is looking
-   * at the row of chips, so the tree's menu asks this rather than "is it
-   * pinned" - otherwise it would say "remove" about a file it cannot remove.
+   * One way in: the user put it there - with the button above the composer, or
+   * from the tree's own menu. Opening a file does not put it in the message. The
+   * tree's menu asks this question rather than "is it pinned", so that it can say
+   * the same thing about the open file as it does about any other.
    */
   function hasContextFile(path) {
-    if (state.contextFiles.includes(path)) return true;
-    const context = editor.context();
-    return Boolean(settings().agent.includeActiveFile) && context.file === path && !state.contextMuted.has(path);
+    return state.contextFiles.includes(path);
   }
 
   function addContextFile(path) {
@@ -1043,8 +1046,6 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
       return false;
     }
     state.contextFiles.push(path);
-    // Pinning it again is the one way back from having dropped it.
-    state.contextMuted.delete(path);
     renderContext();
     return true;
   }
@@ -1060,38 +1061,30 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
   /**
    * Pin a file or take it out: what the tree's own menu asks for.
    *
-   * "Out" means out of the next message, which for the file in the editor is not
-   * the same as unpinning it: the preference would draw its chip again on the
-   * next redraw, and a menu item called "remove" that leaves the file in place
-   * is worse than no menu item at all.
+   * Both directions are the same pair of calls, because there is only one place a
+   * file in the message can come from.
    */
   function toggleContextFile(path) {
-    if (hasContextFile(path)) {
-      if (state.contextFiles.includes(path)) removeContextFile(path);
-      state.contextMuted.add(path);
-      renderContext();
-      return false;
-    }
-    return addContextFile(path);
+    if (!hasContextFile(path)) return addContextFile(path);
+    return removeContextFile(path);
   }
 
   /**
    * What the next message carries.
    *
-   * The open file is offered by preference, the pinned ones always, and a file
-   * the user took out stays out until it is pinned back - the previous version
-   * had no way to take one out at all, and a chip that returned on its own would
-   * be the same broken promise.
+   * Only what the user put there, plus the selected text if they selected
+   * something: a selection is something a person did on purpose, and it is
+   * reported as text with its line numbers rather than as a hint that a file
+   * exists. The open file is deliberately not among these - it is where the user
+   * is looking, not necessarily what they are asking about.
    */
   function messageContext() {
     const context = editor.context();
     const preferences = settings().agent;
-    const open =
-      preferences.includeActiveFile && context.file && !state.contextMuted.has(context.file) ? context.file : '';
     return {
-      file: open,
-      files: contextFiles().filter((path) => path !== open),
-      dirty: open ? context.dirty : false,
+      file: '',
+      files: contextFiles(),
+      dirty: false,
       language: context.language,
       selection: preferences.includeSelection ? context.selection : '',
       selectionRange: context.selectionRange
@@ -1117,30 +1110,26 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
     const preferences = settings().agent;
     clear(contextHost);
 
-    const open =
-      preferences.includeActiveFile && context.file && !state.contextMuted.has(context.file) ? context.file : '';
-    if (open) {
-      contextHost.append(contextChip(open, 'chat.contextFile', 'chat.contextDropOpen', () => {
-        state.contextMuted.add(open);
-        renderContext();
-      }));
-    }
     for (const path of state.contextFiles) {
-      if (path === open) continue;
       contextHost.append(
-        contextChip(path, 'chat.contextFilePinned', 'chat.contextDrop', () => void removeContextFile(path))
+        contextChip(path, 'chat.contextFilePinned', 'chat.contextDrop', () => removeContextFile(path))
       );
     }
-    // The open file can also be pinned by hand, and only while it is not in the
-    // message already: a button that does nothing reads as broken.
-    if (context.file && !open && !state.contextFiles.includes(context.file)) {
+    /**
+     * The open file, offered but never assumed.
+     *
+     * A file has to be put into the message on purpose. The button is here, one
+     * click away, and it disappears once the file is in - a button that does
+     * nothing reads as broken.
+     */
+    if (context.file && !state.contextFiles.includes(context.file)) {
       contextHost.append(
         el('button', {
           class: 'ctx ctx--add',
           type: 'button',
           title: t('chat.contextAddOpen', { path: context.file }),
           text: t('chat.contextAdd'),
-          onclick: () => void addContextFile(context.file)
+          onclick: () => addContextFile(context.file)
         })
       );
     }
@@ -1149,11 +1138,6 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
         ? t('chat.selection', { from: context.selectionRange.start, to: context.selectionRange.end })
         : t('chat.selectionChars', { count: context.selection.length });
       contextHost.append(el('span', { class: 'ctx' }, [el('span', { class: 'ctx__label', text: label })]));
-    }
-    if (context.dirty && open) {
-      contextHost.append(
-        el('span', { class: 'ctx' }, [el('span', { class: 'ctx__label', text: t('chat.unsaved') })])
-      );
     }
     renderContextMeter();
   }

@@ -193,6 +193,8 @@ const MENU_LABELS = {
   'Restart Agent': 'menu.restartAgent',
   'About LexiQode': 'menu.about',
   'Settings…': 'menu.settings',
+  Run: 'menu.run',
+  'Run Active File': 'menu.runFile',
   'Check for Updates…': 'menu.checkUpdates',
   'Open Settings File': 'menu.settingsFile',
   'Open Data Folder': 'menu.dataFolder'
@@ -245,6 +247,14 @@ function buildMenu() {
         { type: 'separator' },
         { label: 'Find in File', accelerator: 'CmdOrCtrl+F', click: () => sendCommand('editor.find') },
         { label: 'Find in Files', accelerator: 'CmdOrCtrl+Shift+F', click: () => sendCommand('search.open') }
+      ]
+    },
+    {
+      label: 'Run',
+      submenu: [
+        // One key, one action: Electron refuses a chained accelerator, and this
+        // is the key every editor uses for "run what is open".
+        { label: 'Run Active File', accelerator: 'F5', click: () => sendCommand('file.run') }
       ]
     },
     {

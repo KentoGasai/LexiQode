@@ -43,13 +43,15 @@ on one line, and how much of the model's window is in use under the composer.*
 | Area | What it does |
 |---|---|
 | Editor | Monaco: syntax highlighting, tabs, unsaved-change marker, find in file, line endings preserved as they were |
+| Suggestions | words from the open file in any language; for JavaScript, TypeScript, JSON, CSS and HTML a language service: members, signatures, parameter hints and underlined mistakes |
+| Running code | a ▶ button in the top-right corner of the editor, and `F5`: the open file is saved and run in the shell below - `.js`, `.mjs`, `.cjs` through `node`, `.py` through `python`, `.ps1`, `.bat`, `.cmd` and `.sh` through their own interpreter |
 | Explorer | file tree that follows the disk by itself, right-click menu on a file and on a folder, add a file to the assistant's context, create, rename, delete to the recycle bin, reveal in Explorer, copy path |
 | Navigation | go to file with `Ctrl+P` using fuzzy matching, command palette |
 | Search | find in files with streaming results and cancellation |
 | Source control | git: staged and unstaged separated, diffs, stage, unstage, discard, commit, branch switching |
 | Terminal | a real PowerShell session in the bottom panel, colours, working directory preserved; it opens by itself in the folder that was just opened |
 | Assistant | the model chosen beside the mode button, streaming answers, reasoning folded into a "Thinking…" line above the answer, one line of tools per turn (arguments and results one click away), a context gauge and automatic compaction, approvals, cancel |
-| Message context | every file the next message will carry is a chip with a cross: add one from the tree or from the open file, take it out, put it back |
+| Message context | a message carries only what you put into it: the button above the composer adds the open file, the tree's menu adds any other, a chip's cross takes it out. Opening a file cannot put it in the context, because reading a file is not a question |
 | Chats | every conversation is saved on disk on its own and opens in a tab: a new chat does not erase the previous one, a saved chat can be reopened from the list, and each can be renamed or deleted |
 | Modes | Agent, Ask, Plan, Debug, Review - what the next message is allowed to do |
 | Interface | resizable and restorable layout, dark and light themes (a button in the bottom-left corner, the command palette, the settings), Russian and English |
@@ -274,7 +276,7 @@ cd core;  python -m pytest tests -q
 cd app;   npm test
 ```
 
-Eight scripts start the application and interrogate it from outside. All of them run
+Ten scripts start the application and interrogate it from outside. All of them run
 with an isolated configuration, so they can be started while the application is
 open and never touch your own files:
 
@@ -285,7 +287,9 @@ open and never touch your own files:
 | `probe-chat-window.cjs` | the assistant through the window: settings, model choice, an answer, reasoning, tools, chat tabs |
 | `probe-explorer-live.cjs` | the tree follows the disk; right-click on a file and on empty space |
 | `probe-editor-colors.cjs` | seven kinds of file open with their own language and with colours: it checks the language id and counts the token colours |
-| `probe-app-features.cjs` | the shell that opens with the folder, the model next to the mode and not overlapping it even with a long id, a file removed from the message and put back, the theme and settings buttons, the settings dialog and its write path, what the update check reports, and that the settings offer no download or install button; the composer line is captured into a temporary folder |
+| `probe-editor-suggest.cjs` | suggestions while typing: a document word for Python and a suggestion carrying a signature for JavaScript, plus underlined errors - which is what says the language service runs rather than only the tokenizer |
+| `probe-run.cjs` | the ▶ button really runs code: it writes a small script into a temporary folder, opens it, presses the button and waits for what the script prints |
+| `probe-app-features.cjs` | the shell that opens with the folder, the model next to the mode and not overlapping it even with a long id, the open file **not** entering the message by itself (and entering it from the button), the theme, settings and run buttons, the settings dialog and its write path, what the update check reports, and that the settings offer no download or install button; the composer line is captured into a temporary folder |
 | `probe-update-offer.cjs` | whether a download is offered when GitHub has a newer release (needs the network; downloads nothing) |
 | `probe-chat.cjs` | the core end to end, through a stub OpenAI-compatible server |
 | `capture-screenshots.cjs` | takes the screenshots for this README (above) |

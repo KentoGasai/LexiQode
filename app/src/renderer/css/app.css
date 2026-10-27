@@ -449,6 +449,56 @@ textarea {
 
 /* ------------------------------------------------------------------ main */
 
+/**
+ * The strip above the editor: the open tabs, and the run button.
+ *
+ * The background and the border live here rather than on the tab strip, because
+ * the strip is now one of two things in this row. With no tabs and nothing to run
+ * the whole row disappears, so the editor is not preceded by an empty band.
+ */
+.editorhead {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  height: 32px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+}
+
+.editorhead:has(.tabs:empty):has(.editorhead__actions:empty) {
+  display: none;
+}
+
+.editorhead__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  margin-left: auto;
+}
+
+.editorhead__actions:empty {
+  padding: 0;
+}
+
+/* The run button is the one action here, so it is allowed to stand out. */
+.runbtn {
+  width: 26px;
+  height: 26px;
+  color: var(--ok);
+}
+
+.runbtn:hover {
+  background: var(--surface-3);
+  color: var(--ok);
+}
+
+.runbtn:disabled {
+  color: var(--text-dim);
+  cursor: default;
+  opacity: 0.55;
+}
+
 .main {
   position: relative;
   display: flex;
@@ -500,13 +550,12 @@ kbd {
 /* ------------------------------------------------------------------ tabs */
 
 .tabs {
-  flex: 0 0 auto;
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   align-items: stretch;
   gap: 0;
   height: 32px;
-  background: var(--bg-elevated);
-  border-bottom: 1px solid var(--border);
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;

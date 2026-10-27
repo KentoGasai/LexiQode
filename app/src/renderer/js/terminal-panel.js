@@ -74,6 +74,23 @@ export function createTerminalPanel({ api, bus, settings, onNotice }) {
     }
   }
 
+  /**
+   * Run a command the window built, in the folder that is open.
+   *
+   * Used by the run button, which is why it makes sure a session exists first:
+   * pressing Run with no shell open should start one and run the file, not say
+   * that there is no terminal. The line is echoed into the console the same way a
+   * typed command is, so the record of what was run is in one place.
+   */
+  async function run(command) {
+    const text = String(command || '').trim();
+    if (!text) throw new Error(t('terminal.nothingToRun'));
+    const session = await openInFolder();
+    if (!session) throw new Error(t('terminal.noFolder'));
+    await submit(text);
+    return { id: session.id, command: text };
+  }
+
   function renderTabs() {
     clear(tabsHost);
     for (const [id, session] of sessions) {
@@ -260,5 +277,5 @@ export function createTerminalPanel({ api, bus, settings, onNotice }) {
     input.focus();
   }
 
-  return { mount, unmount, open, openInFolder, focus, get count() { return sessions.size; } };
+  return { mount, unmount, open, openInFolder, run, focus, get count() { return sessions.size; } };
 }

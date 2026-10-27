@@ -55,7 +55,15 @@
         </aside>
 
         <main class="main">
-          <div class="tabs" id="tabs"></div>
+          <!--
+            The tab strip, and beside it the one action that belongs to the whole
+            editor rather than to a panel: run the file that is open. It sits in
+            the top-right corner of the editor, where a person looks for it.
+          -->
+          <div class="editorhead">
+            <div class="tabs" id="tabs"></div>
+            <div class="editorhead__actions" id="editor-actions"></div>
+          </div>
           <div class="editor" id="editor"></div>
           <section class="welcome" id="welcome"></section>
 

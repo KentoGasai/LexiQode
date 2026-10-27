@@ -19,6 +19,7 @@ import { createChat } from './chat.js';
 import { createAppSettings } from './app-settings.js';
 import { rank } from './fuzzy.js';
 import { nextSize } from './split.js';
+import { commandFor } from './run.js';
 import { agentStateKey, current as i18nInfo, initI18n, t } from './i18n.js';
 
 const api = window.lexiqode;
@@ -242,6 +243,74 @@ async function openFolderInTerminal(folder) {
   if (session) toast('info', t('toast.terminalOpened', { folder: folder.name || folder.root }));
 }
 
+// -------------------------------------------------------------------- run
+
+/**
+ * The command the Play button would send, or null when there is nothing to run.
+ *
+ * Kept as one function because three things ask the same question: the button
+ * (does it draw at all, and what does its tooltip say), the command palette, and
+ * the menu item that arrives from the main process.
+ */
+function runPlan() {
+  const file = editor?.active || '';
+  if (!file) return null;
+  return commandFor(file, {
+    shell: settingsValue.terminal.shell,
+    root: workspace ? workspace.root : ''
+  });
+}
+
+/** Draw the run button: present only when there is a file it could run. */
+function renderEditorActions() {
+  const host = document.getElementById('editor-actions');
+  if (!host) return;
+  host.replaceChildren();
+  const plan = runPlan();
+  if (!plan) return;
+  host.append(
+    el('button', {
+      class: 'iconbtn runbtn',
+      type: 'button',
+      title: t('run.button', { command: plan.command }),
+      'aria-label': t('run.button', { command: plan.command }),
+      html: icon('play'),
+      onclick: () => void runActiveFile()
+    })
+  );
+}
+
+/**
+ * Run the file in the editor, in the shell below.
+ *
+ * The file is saved first: running a stale copy of what is on screen is the kind
+ * of surprise that costs an hour, and the editor knows whether there is anything
+ * to save. The panel is opened before the command is sent, because the output has
+ * to appear somewhere, and a long-running program keeps the shell after the
+ * window stops watching it - the session is the user's, not the button's.
+ */
+async function runActiveFile() {
+  const file = editor?.active;
+  if (!file) {
+    toast('info', t('run.noFile'));
+    return;
+  }
+  const plan = runPlan();
+  if (!plan) {
+    toast('info', t('run.unsupported', { path: file }));
+    return;
+  }
+  await editor.save(file, { quiet: true });
+  togglePanel(true);
+  terminal.mount();
+  try {
+    await terminal.run(plan.command);
+    toast('info', t('run.started', { command: plan.command }));
+  } catch (error) {
+    toast('error', error.message);
+  }
+}
+
 // -------------------------------------------------------------- statusbar
 
 const gitInfo = { branch: '', ahead: 0, behind: 0, repo: false };
@@ -427,6 +496,7 @@ const COMMANDS = [
   { id: 'file.open', key: 'cmd.openFile', hint: 'Ctrl+O' },
   { id: 'file.save', key: 'cmd.save', hint: 'Ctrl+S' },
   { id: 'file.saveAll', key: 'cmd.saveAll', hint: 'Ctrl+K S' },
+  { id: 'file.run', key: 'cmd.runFile', hint: 'F5' },
   { id: 'file.close', key: 'cmd.closeEditor', hint: 'Ctrl+W' },
   { id: 'editor.find', key: 'cmd.findInFile', hint: 'Ctrl+F' },
   { id: 'search.open', key: 'cmd.findInFiles', hint: 'Ctrl+Shift+F' },
@@ -631,6 +701,11 @@ async function runCommand(name, argument) {
       break;
     case 'file.saveAll':
       await editor.saveAll();
+      break;
+    case 'file.run':
+      // The menu, the palette and the button all arrive here: one place decides
+      // what running a file means, including what it says when it cannot.
+      await runActiveFile();
       break;
     case 'file.close':
       if (editor.active) await editor.closeTab(editor.active);
@@ -953,6 +1028,7 @@ function wireEvents() {
     workspace = value;
     updateTitle();
     renderStatusbar();
+    renderEditorActions();
     editor.closeAll();
     if (!workspace) {
       toast('info', t('toast.folderClosed'));
@@ -1034,6 +1110,8 @@ async function boot() {
     onActiveChange: () => {
       updateCursor();
       chat?.renderContext();
+      // The button belongs to the file that is open, so it is drawn with it.
+      renderEditorActions();
       persistSession();
     },
     onNotice: (message, kind) => toast(kind || 'info', message)

@@ -3,8 +3,10 @@
  *
  * Monaco is loaded from the vendored copy through its AMD loader, because a
  * window with no network access cannot fetch it and a bundled copy would need a
- * build step for no benefit. The worker is same-origin, so language services run
- * off the main thread and a large file does not freeze typing.
+ * build step for no benefit. Its language services run in workers that it starts
+ * and prepares itself, out of the vendored tree; this file deliberately says
+ * nothing about where those workers are (`createEditor` explains why), and the
+ * `asset-protocol` scheme is what makes them load.
  *
  * Line endings are the detail worth naming: the main process reports the ending
  * a file already used, and saving writes it back. A file is therefore never
@@ -21,9 +23,6 @@ let monacoPromise = null;
 function loadMonaco() {
   if (monacoPromise) return monacoPromise;
   monacoPromise = new Promise((resolve, reject) => {
-    const workerUrl = new URL(`${MONACO_ROOT}/base/worker/workerMain.js`, document.baseURI).href;
-    self.MonacoEnvironment = { getWorkerUrl: () => workerUrl };
-
     const loader = document.createElement('script');
     loader.src = `${MONACO_ROOT}/loader.js`;
     loader.onerror = () => reject(new Error('Monaco could not be loaded from vendor/monaco (run "npm run vendor")'));
@@ -72,6 +71,26 @@ const THEMES = {
 
 export async function createEditor({ api, settings, onDirtyChange, onActiveChange, onNotice }) {
   const monaco = await loadMonaco();
+  /**
+   * Nothing is installed into `MonacoEnvironment` here, and that is the third
+   * answer to this question.
+   *
+   * The first version told Monaco the worker's address and got it wrong -
+   * `vendor/monaco/vs/base/worker/workerMain.js` does not exist in a 0.57 tree -
+   * which made the language service fail in some runs and not others.
+   *
+   * The second named the address correctly (`getWorker` returning the bundled
+   * file). Every run then started a worker and no run failed to load one, but the
+   * service still never answered: Monaco does not simply load that file, it sets
+   * up the worker's environment first - its locale, its file root, its product
+   * metadata - and then imports it, and a worker started without that answers
+   * word suggestions only. No diagnostics, no signatures. Measured, not guessed:
+   * the probe showed `markers: 0` and a suggestion with no signature.
+   *
+   * So the address is left alone; Monaco both names its workers and prepares
+   * them. What this window owes them instead is a protocol that answers reliably,
+   * which is `corsEnabled` and the response headers in `asset-protocol.js`.
+   */
   const container = document.getElementById('editor');
   const tabsHost = document.getElementById('tabs');
   const welcome = document.getElementById('welcome');
@@ -86,7 +105,24 @@ export async function createEditor({ api, settings, onDirtyChange, onActiveChang
     smoothScrolling: true,
     renderLineHighlight: 'all',
     fixedOverflowWidgets: true,
-    padding: { top: 8, bottom: 12 }
+    padding: { top: 8, bottom: 12 },
+    /**
+     * Suggestions, stated rather than inherited.
+     *
+     * Monaco's defaults already suggest words from the document while typing, but
+     * "the default happens to be on" is not a promise: it changes between
+     * versions, and a person editing Python or PowerShell gets their only help
+     * from these lines. Comments and strings are left out on purpose - a
+     * suggestion list that fires inside prose is noise.
+     */
+    quickSuggestions: { other: true, comments: false, strings: false },
+    suggestOnTriggerCharacters: true,
+    wordBasedSuggestions: 'currentDocument',
+    tabCompletion: 'on',
+    parameterHints: { enabled: true },
+    acceptSuggestionOnEnter: 'on',
+    snippetSuggestions: 'inline',
+    bracketPairColorization: { enabled: true }
   });
 
   /** path -> { model, viewState, savedVersionId, eol, hadFinalNewline, readOnly, kind } */

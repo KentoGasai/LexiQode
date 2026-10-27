@@ -126,7 +126,6 @@ const SECTIONS = [
     rows: [
       { path: 'agent.autoStart', label: 'settings.agentAutoStart', type: 'check' },
       { path: 'agent.defaultMode', label: 'settings.agentDefaultMode', type: 'select', options: MODE_IDS.map((id) => [id, `chat.mode${id[0].toUpperCase()}${id.slice(1)}`]) },
-      { path: 'agent.includeActiveFile', label: 'settings.includeActiveFile', type: 'check', hint: 'settings.includeActiveFileHint' },
       { path: 'agent.includeSelection', label: 'settings.includeSelection', type: 'check' }
     ]
   },

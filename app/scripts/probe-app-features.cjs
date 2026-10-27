@@ -157,7 +157,7 @@ async function main() {
         };
       }
 
-      // --------------------------------------------- taking a file out of a message
+      // ------------------------------- a file enters the message only when asked
       // Only the chips that carry a cross count as being in the message: the
       // "add a file" button shares their class, and counting it would make an
       // empty row look like a full one.
@@ -165,18 +165,17 @@ async function main() {
         qa('#composer-context .ctx')
           .filter((node) => node.querySelector('.ctx__drop'))
           .map((node) => node.textContent.trim());
-      out.context = { before: chips(), addButtonBefore: Boolean(q('#composer-context .ctx--add')) };
+      out.context = { before: chips(), addButton: Boolean(q('#composer-context .ctx--add')) };
+      const add = q('#composer-context .ctx--add');
+      if (add) add.click();
+      await sleep(250);
+      out.context.afterAdd = chips();
       const drop = q('#composer-context .ctx__drop');
       if (drop) drop.click();
       await sleep(250);
       out.context.afterDrop = chips();
-      const add = q('#composer-context .ctx--add');
-      out.context.addButton = Boolean(add);
-      if (add) add.click();
-      await sleep(250);
-      out.context.afterAdd = chips();
 
-      // And from the tree's own menu: the same file, pinned and unpinned.
+      // And from the tree's own menu, where a file is found rather than opened.
       const rowAgain = qa('.tree__row[data-kind="file"]').find(
         (entry) => entry.dataset.path === ${JSON.stringify(SAMPLE)}
       );
@@ -190,6 +189,11 @@ async function main() {
         if (toggle) toggle.click();
         await sleep(250);
         out.context.afterMenu = chips();
+        // A second click takes it out again, which is the other half of the same
+        // promise: the tree can both add and remove.
+        if (toggle) toggle.click();
+        await sleep(250);
+        out.context.afterMenuAgain = chips();
       }
 
       // ------------------------------------------------------------- the theme button
@@ -211,6 +215,15 @@ async function main() {
         }
         out.theme.clicks = seen;
       }
+
+      // ----------------------------------------------------------- the run button
+      const runButton = q('#editor-actions .runbtn');
+      out.run = {
+        present: Boolean(runButton),
+        aboveTheEditor: Boolean(runButton && runButton.closest('.editorhead') && q('.editorhead').nextElementSibling === q('#editor')),
+        icon: Boolean(runButton && runButton.querySelector('svg')),
+        command: runButton ? runButton.title : ''
+      };
 
       // ---------------------------------------------------------- the settings dialog
       // The button first: the dialog being reachable from a key is not the same
@@ -342,13 +355,17 @@ async function main() {
   expect(report && report.settingsButton.inTheStatusbar, 'the settings button is not in the status bar');
   expect(report && report.settingsButton.opened, 'clicking the settings button did not open the settings');
   expect(report && report.settingsButton.closedByEscape, 'Escape did not close the settings opened from the button');
-  expect(report && report.context.before.length >= 1, 'the open file was not offered with the message');
-  expect(report && report.context.before.some((line) => line.includes('×')), 'the file chip has no way to remove it');
+  expect(report && report.context.before.length === 0, 'opening a file put it into the message by itself');
+  expect(report && report.context.addButton, 'there is no way to put the open file into the message');
+  expect(report && report.context.afterAdd.length === 1, 'putting the file into the message did not work');
+  expect(report && report.context.afterAdd.some((line) => line.includes('×')), 'the file chip has no way to remove it');
   expect(report && report.context.afterDrop.length === 0, 'removing the file from the message did not work');
-  expect(report && report.context.addButton, 'after removing it there is no way to put the file back');
-  expect(report && report.context.afterAdd.length === 1, 'pinning the file back did not work');
   expect(report && report.context.menuLabel, 'the tree menu has no context entry');
-  expect(report && report.context.afterMenu.length === 0, 'the tree menu did not take the file out again');
+  expect(report && report.context.afterMenu.length === 1, 'the tree menu did not put the file into the message');
+  expect(report && report.context.afterMenuAgain.length === 0, 'the tree menu did not take the file out again');
+  expect(report && report.run.present, 'the editor has no run button');
+  expect(report && report.run.icon && report.run.aboveTheEditor, 'the run button is not drawn above the editor');
+  expect(report && /node |python |powershell |cmd \/c |bash /.test(report.run.command), `the run button does not name a command: ${report ? report.run.command : ''}`);
   expect(report && report.theme.present && report.theme.firstInTheStatusbar, 'the theme button is not in the bottom left corner');
   expect(report && report.theme.clicks && new Set(report.theme.clicks.map((entry) => entry.choice)).size === 3, 'the theme button does not reach all three choices');
   expect(report && report.settings.opened, 'Ctrl+, did not open the settings');

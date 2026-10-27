@@ -220,7 +220,14 @@ const DEFAULTS = {
   agent: {
     autoStart: true,
     defaultMode: 'agent',
-    includeActiveFile: true,
+    /**
+     * Selected text travels with a message when this is on.
+     *
+     * There is deliberately no counterpart for the open file: opening a file is
+     * how a person reads it, and a message that quietly carried it would say
+     * something the sender did not. A file goes into the message when the user
+     * puts it there, from the row above the composer or from the tree's menu.
+     */
     includeSelection: true
   },
   /**
