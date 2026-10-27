@@ -43,7 +43,16 @@ ENV_RUNTIME_FILE = "LEXIQODE_RUNTIME_FILE"
 SETTINGS_FILE_NAME = "settings.json"
 
 #: Bumped when the on-disk layout changes in a way that needs migration.
-SETTINGS_VERSION = 1
+#:
+#: Version 2 raised the default message ceiling from 60, which an agent turn
+#: spends in a few steps - one assistant message and one per tool call - so a
+#: working session was cut down at the end of nearly every turn. A settings file
+#: that still carries the old default is moved to the new one; a value somebody
+#: chose on purpose is left alone.
+SETTINGS_VERSION = 2
+
+#: The message ceiling of version 1, kept only so the migration can recognise it.
+_LEGACY_HISTORY_MESSAGES = 60
 
 
 def _roaming_root() -> Path:
@@ -126,6 +135,15 @@ class ModelProfile:
     #: Ask for token accounting in the stream. Some proxies reject the field, so
     #: the client retries without it.
     stream_usage: bool = True
+    #: Whether the model should reason before it answers.
+    #:
+    #: On is the provider's own default and sends nothing extra, because a model
+    #: that never reasons or an endpoint that does not know the field would reject
+    #: the request. Off is one explicit field - ``reasoning_effort: "none"`` - which
+    #: is how a model that reasons by default (DeepSeek's ``deepseek-reasoner``
+    #: family, the o-series) is told to answer directly. The client drops it again
+    #: if a proxy refuses it, so the switch cannot make a working endpoint fail.
+    reasoning: bool = True
 
     def normalised(self) -> "ModelProfile":
         """Return a copy with the endpoint URL and model id made consistent."""
@@ -180,7 +198,28 @@ class AgentSettings:
     #: Hard ceiling on stored messages, whatever the window would allow. A
     #: backstop for an endpoint whose tokens are far more expensive than the
     #: four-characters-per-token estimate assumes.
-    max_history_messages: int = 60
+    #:
+    #: It is deliberately far above what a turn costs. An agent turn writes one
+    #: message per step plus one per tool call, so a dozen steps with a handful of
+    #: calls each spends more than a hundred messages - at the old ceiling of 60
+    #: the backstop fired at the end of almost every turn, dropping work the user
+    #: had just watched the agent do and saying so every time. The window is the
+    #: real limit; this only ends a conversation that stays small per message but
+    #: is unmanageable in number.
+    max_history_messages: int = 2_000
+
+
+def _migrate(agent: AgentSettings, version: int) -> None:
+    """Bring a settings file written by an older build up to the current shape.
+
+    Only a value that is *still exactly* the old default is moved, and only when
+    the file predates the change: a number somebody typed is a decision, while a
+    ceiling that a build chose for them is not. That is the whole reason the
+    version is stored at all.
+    """
+
+    if version < 2 and agent.max_history_messages == _LEGACY_HISTORY_MESSAGES:
+        agent.max_history_messages = AgentSettings().max_history_messages
 
 
 @dataclass(slots=True)
@@ -240,8 +279,10 @@ class Settings:
             agent = AgentSettings(**known)
 
         port = data.get("port", 0)
+        version = int(data.get("version", SETTINGS_VERSION))
+        _migrate(agent, version)
         return cls(
-            version=int(data.get("version", SETTINGS_VERSION)),
+            version=SETTINGS_VERSION,
             active_profile=str(data.get("active_profile") or "default"),
             profiles=profiles,
             agent=agent,

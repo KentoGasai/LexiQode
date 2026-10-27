@@ -12,6 +12,14 @@
  * in a real window, opens the file, presses the button and waits for the number
  * the script prints. Nothing of the repository is used or touched.
  *
+ * It checks two separate things, because they fail separately: that the output
+ * *arrives* (the event stream carries it) and that it is *painted* (the terminal's
+ * rows contain it). A panel with no terminal in it receives text and shows none of
+ * it, which is what "the Run button does nothing" turned out to be.
+ *
+ * Run it alone: two probes at once open two windows, and a window behind another
+ * has its frames throttled.
+ *
  * Run: node scripts/probe-run.cjs
  */
 
@@ -52,8 +60,13 @@ async function main() {
       const out = { output: [] };
 
       // Everything the shell says, gathered from the moment the window opens.
+      out.ids = [];
       window.lexiqode.on('terminal:data', (payload) => {
-        if (payload && payload.data) out.output.push(String(payload.data));
+        if (!payload) return;
+        if (payload.data) out.output.push(String(payload.data));
+        // Which session the text belongs to, because a shell that answers in a
+        // session nobody is looking at is indistinguishable from a dead one.
+        if (payload.data && out.ids[out.ids.length - 1] !== payload.id) out.ids.push(payload.id);
       });
 
       await window.lexiqode.workspace.open(${JSON.stringify(folder)});
@@ -83,8 +96,72 @@ async function main() {
         await sleep(250);
       }
       out.sessionsAfter = (await window.lexiqode.terminal.list().catch(() => [])).length;
+      out.sessionIds = (await window.lexiqode.terminal.list().catch(() => [])).map((entry) => ({
+        id: entry.id,
+        cwd: entry.cwd,
+        alive: entry.alive
+      }));
+      out.tabs = qa('#panel-tabs .panel__tab').map((tab) => ({
+        text: tab.textContent.trim(),
+        selected: tab.getAttribute('aria-selected')
+      }));
       out.panelVisible = !q('#panel').hidden;
       out.text = out.output.join('').replace(/\\u001b\\[[0-9;]*m/g, '').trim();
+      /*
+       * The terminal paints on its own schedule, and that schedule is a frame.
+       *
+       * Reading the DOM in the same tick as the last chunk of output measures the
+       * moment before the frame, and a window behind another one gets its frames
+       * throttled - which is why this waits for the text instead of for a fixed
+       * moment. (Two probes started at once occlude each other: run them one at a
+       * time.)
+       */
+      out.paintWaitedMs = 0;
+      for (let attempt = 0; attempt < 25; attempt += 1) {
+        const rows = q('#panel-body .xterm-rows');
+        if (rows && rows.textContent.includes(${JSON.stringify(MARKER)})) break;
+        await sleep(200);
+        out.paintWaitedMs += 200;
+      }
+
+      /*
+       * Whether any of that is on screen.
+       *
+       * The output arriving and the output being painted are two different
+       * things, and the difference is invisible to every check that only watches
+       * the event stream: a terminal that was disposed, re-parented or opened
+       * while its panel had no size keeps receiving text and draws none of it,
+       * so the panel is blank and the person sees "nothing happened".
+       */
+      const host = q('#panel-body .terminal');
+      const screen = q('#panel-body .xterm-screen');
+      const rows = q('#panel-body .xterm-rows');
+      out.paint = {
+        host: Boolean(host),
+        xterm: Boolean(q('#panel-body .xterm')),
+        screen: Boolean(screen),
+        rowsPresent: Boolean(rows),
+        // The whole buffer, because the shell's answer is at the bottom of it and
+        // a preview of the top would report a working terminal as empty.
+        paintedAll: rows ? rows.textContent.replace(/\\s+/g, ' ').trim() : '',
+        painted: rows ? rows.textContent.replace(/\\s+/g, ' ').trim().slice(-240) : '',
+        hostHeight: host ? Math.round(host.getBoundingClientRect().height) : 0,
+        panelHeight: Math.round((q('#panel') || { getBoundingClientRect: () => ({ height: 0 }) }).getBoundingClientRect().height),
+        body: q('#panel-body') ? q('#panel-body').innerHTML.slice(0, 300) : '',
+        terminalGlobal: typeof window.Terminal,
+        terminalVersion: window.Terminal ? String(window.Terminal.version || '') : '',
+        fitGlobal: typeof window.FitAddon,
+        // Every element that looks like a terminal, wherever it is: the question
+        // is not only whether xterm drew something, but where it drew it.
+        census: qa('.terminal, .xterm, [class*="xterm"]').slice(0, 12).map((node) => ({
+          cls: String(node.className),
+          connected: node.isConnected,
+          parent: node.parentElement ? (node.parentElement.id || String(node.parentElement.className)) : null,
+          children: node.childElementCount,
+          text: String(node.textContent || '').trim().slice(0, 60)
+        }))
+      };
+
       return out;
     `);
 
@@ -95,6 +172,13 @@ async function main() {
     if (!report.button || !report.button.present) problems.push('there is no run button in the editor');
     if (!text.includes(`${MARKER}:42`)) problems.push('the script did not run, or its output never arrived');
     if (!report.panelVisible) problems.push('the output landed in a panel nobody can see');
+    // Nothing on screen is the failure a person actually reports, so it is
+    // checked separately from the output having arrived.
+    if (!report.paint || !report.paint.rowsPresent) {
+      problems.push('the panel has no terminal on screen at all');
+    } else if (!String(report.paint.paintedAll).includes(`${MARKER}:42`)) {
+      problems.push('the output arrived but was never painted, so the shell looks empty');
+    }
     // The command itself is echoed into the console buffer rather than into the
     // shell's output, so it is read from the button that sent it.
     if (!report.button || !/node .*run-check\.js/.test(report.button.title || '')) {

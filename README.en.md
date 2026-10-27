@@ -26,8 +26,9 @@ the screen over DevTools, so no personal path and no key appears in any of them.
 
 ![The assistant](docs/screenshots/02-assistant.png)
 
-*The assistant: reasoning folded into a line above the answer, the tools of the turn
-on one line, and how much of the model's window is in use under the composer.*
+*The assistant: every step has its own reasoning folded into a "Thinking…" line above
+its answer, and its own actions on one line; the reasoning switch sits beside the
+model, and how much of the model's window is in use is shown under the composer.*
 
 | | |
 |---|---|
@@ -50,7 +51,7 @@ on one line, and how much of the model's window is in use under the composer.*
 | Search | find in files with streaming results and cancellation |
 | Source control | git: staged and unstaged separated, diffs, stage, unstage, discard, commit, branch switching |
 | Terminal | a real PowerShell session in the bottom panel, colours, working directory preserved; it opens by itself in the folder that was just opened |
-| Assistant | the model chosen beside the mode button, streaming answers, reasoning folded into a "Thinking…" line above the answer, one line of tools per turn (arguments and results one click away), a context gauge and automatic compaction, approvals, cancel |
+| Assistant | the model and a reasoning switch beside the mode button, streaming answers drawn one step at a time: each step has its own reasoning in a "Thinking…" line above its own answer and its own tools on one line (arguments and results one click away), a context gauge and automatic compaction, approvals, cancel |
 | Message context | a message carries only what you put into it: the button above the composer adds the open file, the tree's menu adds any other, a chip's cross takes it out. Opening a file cannot put it in the context, because reading a file is not a question |
 | Chats | every conversation is saved on disk on its own and opens in a tab: a new chat does not erase the previous one, a saved chat can be reopened from the list, and each can be renamed or deleted |
 | Modes | Agent, Ask, Plan, Debug, Review - what the next message is allowed to do |
@@ -256,8 +257,10 @@ powershell -ExecutionPolicy Bypass -File scripts\build-app.ps1
 
 The script runs the tests, stages a portable folder and writes an archive with its
 digest into `dist\`. The version comes from `app/package.json`. `-SkipTests` skips
-the tests; `scripts\run-app.ps1 -Source` runs the application from the sources
-without building.
+the tests. `scripts\run-app.ps1` with no arguments runs the application **from the
+sources**, so an edit is visible without building anything; `-Bundle` starts the
+staged folder instead, and `-Deploy` copies it into
+`%LOCALAPPDATA%\Programs\LexiQode` and starts it from there.
 
 Publishing a build is a matter of attaching the archive to a GitHub release:
 
@@ -284,7 +287,7 @@ open and never touch your own files:
 |---|---|
 | `probe-window.cjs` | the whole window: tree, editor, search, terminal, model list |
 | `probe-interactions.cjs` | the panels with no folder open, dragging boundaries, saving by keyboard |
-| `probe-chat-window.cjs` | the assistant through the window: settings, model choice, an answer, reasoning, tools, chat tabs |
+| `probe-chat-window.cjs` | the assistant through the window: settings, model choice, a step-by-step answer (two steps as two blocks, the second "Thinking…" after the first answer), the reasoning switch all the way to the request, tools, chat tabs |
 | `probe-explorer-live.cjs` | the tree follows the disk; right-click on a file and on empty space |
 | `probe-editor-colors.cjs` | seven kinds of file open with their own language and with colours: it checks the language id and counts the token colours |
 | `probe-editor-suggest.cjs` | suggestions while typing: a document word for Python and a suggestion carrying a signature for JavaScript, plus underlined errors - which is what says the language service runs rather than only the tokenizer |

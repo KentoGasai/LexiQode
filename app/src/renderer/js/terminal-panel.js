@@ -117,30 +117,31 @@ export function createTerminalPanel({ api, bus, settings, onNotice }) {
       body.append(el('div', { class: 'list__empty', text: t('terminal.empty') }));
       return;
     }
-    const host = el('div', { class: 'terminal' });
-    body.append(host, inputRow);
-    session.term.open(host);
-    try {
-      session.fit.fit();
-      session.term.focus();
-    } catch {
-      // The panel is hidden or has no size yet; a later resize fixes it.
-    }
-    // A terminal opened while its panel was collapsed - or opened by the window's
-    // own start-up, before the panel has been laid out - measures zero rows and
-    // then draws nothing, even though the session is running and output is
-    // arriving. Watching the element is what turns "output arrives" into "output
-    // is on screen", for that case and for every later resize.
-    if (!session.observer && typeof ResizeObserver === 'function') {
-      session.observer = new ResizeObserver(() => {
-        try {
-          session.fit.fit();
-        } catch {
-          // No size to fit to yet.
-        }
-      });
-      session.observer.observe(host);
-    }
+    /*
+     * The one host element the session keeps for its whole life.
+     *
+     * `renderBody` used to build a fresh `<div class="terminal">` every time and
+     * hand it to `term.open()`. xterm 6 refuses that: `open(parent)` returns
+     * immediately when the parent is already part of the document - it decides
+     * from `parent.isConnected` that the terminal is open already and builds
+     * nothing. Measured, not guessed: the panel held a 154-pixel host with no
+     * `.xterm-screen` inside it while the shell's output arrived normally, so the
+     * window showed an empty rectangle and pressing Run looked like nothing
+     * happening. The terminal had no DOM at all.
+     *
+     * The host is therefore created once, before it is attached, and only ever
+     * moved: clearing the panel detaches it, and appending it again brings the
+     * terminal's own DOM with it, exactly as it was.
+     */
+    body.append(session.host, inputRow);
+    requestAnimationFrame(() => {
+      try {
+        session.fit.fit();
+        session.term.focus();
+      } catch {
+        // The panel is hidden or has no size yet; the observer will fix that.
+      }
+    });
     input.focus();
   }
 
@@ -172,13 +173,40 @@ export function createTerminalPanel({ api, bus, settings, onNotice }) {
       });
       const fit = new window.FitAddon.FitAddon();
       term.loadAddon(fit);
-      sessions.set(session.id, {
+      /*
+       * The host is opened while it is still detached, and that is the whole
+       * point: xterm 6 builds the terminal's DOM during this call and skips it
+       * entirely when the parent is already in the document. Attaching the host
+       * first - which is what the code did - produced a terminal with no DOM at
+       * all, a panel that looked empty, and a Run button that appeared to do
+       * nothing while its output arrived.
+       */
+      const host = el('div', { class: 'terminal' });
+      term.open(host);
+      const record = {
         id: session.id,
         title: `${workspace ? workspace.name : 'shell'} ${counter}`,
         term,
         fit,
-        root: workspace ? workspace.root : ''
-      });
+        host,
+        root: workspace ? workspace.root : '',
+        observer: null
+      };
+      // A terminal opened while its panel was collapsed measures zero rows and
+      // then draws nothing, even though the session is running and output is
+      // arriving. Watching the element is what turns "output arrives" into
+      // "output is on screen", for that case and for every later resize.
+      if (typeof ResizeObserver === 'function') {
+        record.observer = new ResizeObserver(() => {
+          try {
+            record.fit.fit();
+          } catch {
+            // No size to fit to yet.
+          }
+        });
+        record.observer.observe(host);
+      }
+      sessions.set(session.id, record);
       term.writeln(`\x1b[90m${session.shell} · ${session.cwd}\x1b[0m`);
       term.writeln(`\x1b[90m${t('terminal.intro')}\x1b[0m`);
       term.onData((data) => {

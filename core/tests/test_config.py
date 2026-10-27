@@ -14,6 +14,7 @@ from lexiqode.config import (
     ENV_CONFIG_DIR,
     ENV_DATA_DIR,
     ENV_MODEL,
+    SETTINGS_VERSION,
     AgentSettings,
     ModelProfile,
     Settings,
@@ -170,6 +171,34 @@ class RoundTripTest(unittest.TestCase):
         self.assertEqual(redact("short"), "*" * 5)
         self.assertTrue(redact("a" * 40).startswith("aaaa"))
         self.assertNotIn("a" * 40, redact("a" * 40))
+
+
+class SettingsMigrationTest(unittest.TestCase):
+    """A settings file written by an older build is brought forward, once.
+
+    A backstop nobody chose is not a decision, and leaving it alone is what made
+    a working session drop messages at the end of nearly every turn: the message
+    ceiling of an agent turn is spent in a few steps. A number somebody typed is a
+    decision, and stays.
+    """
+
+    def test_the_old_message_ceiling_is_raised(self) -> None:
+        settings = Settings.from_dict({"version": 1, "agent": {"max_history_messages": 60}})
+
+        self.assertEqual(settings.agent.max_history_messages, AgentSettings().max_history_messages)
+        self.assertEqual(settings.version, SETTINGS_VERSION)
+
+    def test_a_ceiling_somebody_chose_is_left_alone(self) -> None:
+        settings = Settings.from_dict({"version": 1, "agent": {"max_history_messages": 250}})
+
+        self.assertEqual(settings.agent.max_history_messages, 250)
+
+    def test_a_current_file_is_not_touched(self) -> None:
+        settings = Settings.from_dict(
+            {"version": SETTINGS_VERSION, "agent": {"max_history_messages": 60}}
+        )
+
+        self.assertEqual(settings.agent.max_history_messages, 60)
 
 
 if __name__ == "__main__":

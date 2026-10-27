@@ -77,6 +77,13 @@ class OpenAIChatClient:
             payload["tool_choice"] = "auto"
         if stream and self.profile.stream_usage:
             payload["stream_options"] = {"include_usage": True}
+        # Reasoning off is stated rather than omitted. A model that reasons by
+        # default - which is what this switch exists for - cannot be told to stop
+        # by saying nothing, and ``reasoning_effort: "none"`` is the field both
+        # DeepSeek and the o-series understand. On sends nothing at all, so an
+        # endpoint that does not know the field is never asked about it.
+        if not self.profile.reasoning:
+            payload["reasoning_effort"] = "none"
         return payload
 
     def _raise_for_status(self, response: httpx.Response) -> None:
@@ -95,29 +102,38 @@ class OpenAIChatClient:
         )
 
     def _post_stream(self, payload: dict[str, Any]) -> httpx.Response:
-        """Open the streaming response, retrying without rejected extras."""
+        """Open the streaming response, dropping extras the server refuses.
+
+        Two fields are optional by design - ``stream_options`` and the reasoning
+        switch - and a gateway that predates either answers 400 rather than
+        ignoring it. Each is dropped once, only when the refusal names it, and the
+        same request is then sent again: a proxy that dislikes one of them must
+        not turn a working endpoint into a broken one.
+        """
 
         url = self.profile.chat_completions_url()
-        try:
-            request = self._client.build_request("POST", url, json=payload, headers=self._headers())
-            response = self._client.send(request, stream=True)
-        except httpx.HTTPError as exc:
-            raise ProviderError(f"cannot reach {url}: {exc}") from exc
+        response = self._send(url, payload)
 
-        if (
-            response.status_code == 400
-            and self.profile.stream_usage
-            and "stream_options" in (response.read().decode("utf-8", "replace").lower())
-        ):
-            payload = {k: v for k, v in payload.items() if k != "stream_options"}
-            try:
-                request = self._client.build_request("POST", url, json=payload, headers=self._headers())
-                response = self._client.send(request, stream=True)
-            except httpx.HTTPError as exc:
-                raise ProviderError(f"cannot reach {url}: {exc}") from exc
+        if response.status_code == 400:
+            detail = response.read().decode("utf-8", "replace").lower()
+            for field in ("stream_options", "reasoning_effort"):
+                if field not in payload or field not in detail:
+                    continue
+                payload = {k: v for k, v in payload.items() if k != field}
+                response = self._send(url, payload)
+                break
 
         self._raise_for_status(response)
         return response
+
+    def _send(self, url: str, payload: dict[str, Any]) -> httpx.Response:
+        """One streaming POST, with the transport failure named."""
+
+        try:
+            request = self._client.build_request("POST", url, json=payload, headers=self._headers())
+            return self._client.send(request, stream=True)
+        except httpx.HTTPError as exc:
+            raise ProviderError(f"cannot reach {url}: {exc}") from exc
 
     # ------------------------------------------------------------------ streaming
     def stream(

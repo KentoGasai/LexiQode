@@ -16,16 +16,23 @@
  * is made: what the next message is allowed to do. The header carries status
  * only.
  *
- * Three things about a turn are worth reading twice, because all three were
- * wrong in a way that looked like working software.
+ * Four things about a turn are worth reading twice, because all four were wrong
+ * in a way that looked like working software.
  *
- * * The model's scratchpad is folded into one disclosure above the answer, open
- *   while it is still thinking. It used to be drawn as a second assistant turn
- *   appended after the first, which put the thinking under the answer it exists
- *   to explain.
- * * Tool calls are one collapsed line per turn. They used to be a full-width row
- *   each, which buried the answer under a wall of `read_file` entries and showed
- *   `[object Object]` for the arguments, since the core sends them as an object.
+ * * A turn is drawn one step at a time. The core loops: think, answer, call
+ *   tools, think again, answer again. Each step gets its own block, in that
+ *   order, so the second "thinking" appears after the first answer - where it
+ *   belongs - instead of reopening one shared disclosure above it.
+ * * The step's scratchpad is folded into one disclosure above that step's
+ *   answer, open while it is still thinking.
+ * * Tool calls are one collapsed line per step, with the rows a click away. They
+ *   were a full-width row each, which buried the answer under a wall of
+ *   `read_file` entries and printed `[object Object]` for the arguments, since
+ *   the core sends them as an object.
+ * * The complete text of a step replaces that step's deltas and nothing else.
+ *   When one block held the whole turn, the second step's `assistant_text`
+ *   replaced the first step's answer with it, so the answer the model had
+ *   already given disappeared as it kept working.
  * * How full the model's window is, and that the conversation is compacted
  *   before it overflows, is stated in the composer rather than discovered.
  */
@@ -100,8 +107,13 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
     /** Which chat the core itself has open, so a switch is not sent twice. */
     coreChat: '',
     running: false,
+    /** A stop was asked for and the core has not finished the turn yet. */
+    stopping: false,
     current: null,
-    reasoning: null,
+    /** Every block of the turn being drawn, oldest first. */
+    turnBlocks: [],
+    /** What this turn did to the conversation to keep it inside the window. */
+    compaction: null,
     tools: new Map(),
     approvals: new Map(),
     context: null,
@@ -185,10 +197,15 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
       clear(created.meta);
       if (streaming) {
         created.meta.append(el('span', { class: 'spinner' }), el('span', { text: t('chat.working2') }));
-      } else if (created.steps) {
+      } else if (created.maxSteps > 1 && created.step) {
+        // Which piece of work this block is. A turn that needed three steps is
+        // read as three answers, and this line is what says so.
         created.meta.append(
           el('span', {
-            text: t(created.steps === 1 ? 'chat.stepsOne' : 'chat.steps', { count: created.steps })
+            text: t('chat.stepOf', { step: created.step, max: created.maxSteps }),
+            // The bracket is a ceiling, not a plan: without saying so, "of 50" reads
+            // as fifty steps that are coming.
+            title: t('chat.stepOfHint', { max: created.maxSteps })
           })
         );
       }
@@ -208,13 +225,17 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
   }
 
   /**
-   * The model's scratchpad, folded into one disclosure above the answer.
+   * The scratchpad of one step, folded into one disclosure above its answer.
    *
-   * It arrives as `reasoning_delta` before the answer does, so it is inserted as
-   * the first child of this turn rather than as a turn of its own. It stays open
-   * while the model is thinking - that is what makes a slow first token bearable -
-   * and folds away as soon as the answer starts, which is also the state a
-   * conversation is worth re-reading in.
+   * It arrives as `reasoning_delta` before that step's answer does, so it is
+   * inserted above the answer rather than as a turn of its own. It stays open
+   * while the model is thinking - that is what makes a slow first token bearable.
+   *
+   * There is one per step, not one per turn. A model that answers, thinks again
+   * and answers again did three separate things, and a single shared block put
+   * the second thinking above the first answer: the right words in the wrong
+   * order. Because every step is drawn as its own block, the next scratchpad
+   * appears after the answer that came before it.
    */
   function reasoningBlock() {
     const created = activeTurn();
@@ -227,7 +248,7 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
       const body = el('div', { class: 'reasoning__body' });
       head.append(spinner, label, spent);
       node.append(head, body);
-      // Above the answer, and above the tools when those came first.
+      // Above this step's answer, and under this step's tools when those exist.
       created.node.insertBefore(node, created.tools ? created.tools.node : created.body);
       created.reasoning = { node, body, head, label, spent, spinner, startedAt: Date.now(), folded: false, toggled: false };
       // A click is the user's decision, and it outranks the automatic fold.
@@ -235,42 +256,70 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
         created.reasoning.toggled = true;
       });
     }
-    state.reasoning = created.reasoning;
     return created.reasoning;
   }
 
-  /** Say that the model is thinking again, after it already had an answer. */
-  function markThinking(record) {
-    record.folded = false;
-    record.node.open = true;
-    if (!record.spinner.isConnected) record.head.insertBefore(record.spinner, record.label);
-    record.label.textContent = t('chat.thinking');
-    record.spent.textContent = '';
-  }
-
   /**
-   * Fold the scratchpad away and date it, unless the user already decided.
+   * Stop the scratchpad of one step: no spinner, folded, dated.
    *
-   * The label says how long the model thought, because that is the one fact a
-   * reader wants from a folded block they chose not to open.
+   * Called twice in a step's life: when its answer starts, because the answer is
+   * the point by then, and again when the block is finished, because a step can end
+   * without ever answering - the user pressed Stop in the middle of it, or the
+   * endpoint failed. A spinner that outlives the turn is exactly what "the
+   * animation never stops" looks like, so it goes in both cases.
+   *
+   * The label says how long the step thought, because that is the one fact a
+   * reader wants from a block they chose not to open.
    */
-  function foldThinking() {
-    const record = state.reasoning;
-    if (!record || record.folded || record.toggled || !record.body.textContent) return;
+  function settleReasoning(block) {
+    const record = block && block.reasoning;
+    if (!record || record.folded) return;
     record.folded = true;
-    record.node.open = false;
     record.spinner.remove();
+    // An open block stays open: that was the user's decision, not ours.
+    if (!record.toggled) record.node.open = false;
+    if (!record.body.textContent) {
+      // Nothing was ever thought. An empty disclosure is noise, so it goes - unless
+      // the user opened it on purpose, in which case it is theirs to close.
+      if (!record.toggled) {
+        record.node.remove();
+        delete block.reasoning;
+      }
+      return;
+    }
     record.label.textContent = t('chat.thoughts', {
       seconds: Math.max(1, Math.round((Date.now() - record.startedAt) / 1000))
     });
   }
 
+  /** Fold the running step's scratchpad, because its answer has started. */
+  function foldThinking() {
+    settleReasoning(state.current);
+  }
+
   /**
-   * One collapsed line for every tool the turn used.
+   * Mark one step's block as finished: nothing inside it is still turning.
+   *
+   * Both spinners of a step - the scratchpad's and the action list's - say "still
+   * working", and both have to stop when the step does, whatever ended it.
+   */
+  function finishBlock(block) {
+    settleReasoning(block);
+    if (block && block.tools) {
+      block.tools.running = 0;
+      renderToolGroup(block.tools);
+    }
+    renderAssistant(block, false);
+  }
+
+  /**
+   * One collapsed line for every tool this step used.
    *
    * The rows are still there, one click away, with the arguments the model
    * actually sent; what is gone is the wall of them between the question and the
-   * answer.
+   * answer. One group per step rather than one per turn: the group sits under the
+   * answer it belongs to, and a step that calls twenty tools cannot push the rest
+   * of the turn out of reach.
    */
   function toolGroup() {
     const created = activeTurn();
@@ -351,6 +400,13 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
       .filter(Boolean)
       .join('\n\n');
     renderToolGroup(group);
+    /*
+     * A long step is a scrollable list, not a wall that pushes the rest of the
+     * turn away. Following inside its own box is what keeps the newest call
+     * visible while the model works; a reader who scrolled up stays where they
+     * are, because this asks the same question the transcript does.
+     */
+    if (atBottom()) group.rows.scrollTop = group.rows.scrollHeight;
     scrollIfFollowing(atBottom());
   }
 
@@ -388,9 +444,75 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
     clearEmptyState();
     const node = el('div', { class: 'notice', text });
     transcript.append(node);
-    state.current = null;
+    /*
+     * A note in the middle of a turn - a compaction, say - is not an answer.
+     *
+     * It used to clear `state.current` unconditionally, which is right between
+     * turns and wrong inside one: the next delta then opened a second block for
+     * the same step, leaving the first one holding a spinner forever.
+     */
+    if (!state.running) state.current = null;
     scrollIfFollowing(atBottom());
     return node;
+  }
+
+  /**
+   * Why a turn ended, said where it ended.
+   *
+   * A toast is gone before a reader looks up, and "the agent stopped" is exactly
+   * the news that has to stay on screen. The limit also gets a way forward: a turn
+   * that used its whole budget is not a failure, it is a turn that needs another
+   * one, and asking for it is one click rather than retyping the request.
+   */
+  function stopNotice(reason, steps) {
+    const node = el('div', { class: 'notice notice--stopped', dataset: { reason: reason } });
+    if (reason === 'max_steps') {
+      node.append(
+        el('span', {
+          text: t('chat.stepLimit', { steps: steps || 0 })
+        }),
+        el('button', {
+          class: 'btn btn--ghost',
+          type: 'button',
+          text: t('chat.continue'),
+          title: t('chat.continueHint'),
+          onclick: () => {
+            node.remove();
+            void send(t('chat.continueMessage'));
+          }
+        })
+      );
+    } else {
+      node.append(el('span', { text: t('chat.stoppedNotice') }));
+    }
+    transcript.append(node);
+    scrollIfFollowing(true);
+    return node;
+  }
+
+  /**
+   * One line per turn about what the turn did to the conversation.
+   *
+   * A turn that fills the window compacts more than once - a single step can do
+   * it on its own - and four identical notes in a row say less than one that
+   * counts them. The line is rewritten as the turn goes, so it is still one line
+   * when the turn ends.
+   */
+  function noteCompaction(data) {
+    const totals = state.compaction || { times: 0, dropped: 0, summarised: 0, node: null };
+    totals.times += 1;
+    totals.dropped += Number(data.dropped) || 0;
+    if (data.summarised) totals.summarised += 1;
+    state.compaction = totals;
+    if (!totals.node || !totals.node.isConnected) {
+      totals.node = addNotice('');
+      totals.node.classList.add('notice--compaction');
+    }
+    totals.node.textContent = t(totals.summarised ? 'chat.compactedTimes' : 'chat.droppedTimes', {
+      times: totals.times,
+      dropped: totals.dropped
+    });
+    scrollIfFollowing(true);
   }
 
   function approvalCard(payload) {
@@ -457,6 +579,10 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
 
   function renderRunning() {
     stopButton.hidden = !state.running;
+    // Clicking stop is a request, and the core answers it when it reaches a safe
+    // point: until then the button says what is happening instead of looking dead.
+    stopButton.disabled = state.stopping;
+    stopButton.textContent = state.stopping ? t('chat.stopping') : t('chat.stop');
     sendButton.disabled = state.running;
     sendButton.textContent = state.running ? t('chat.working') : t('chat.send');
   }
@@ -590,7 +716,7 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
       }
       clear(transcript);
       state.current = null;
-      state.reasoning = null;
+      state.turnBlocks = [];
       state.tools.clear();
       state.approvals.clear();
       state.context = null;
@@ -615,7 +741,7 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
       state.activeChat = id;
       clear(transcript);
       state.current = null;
-      state.reasoning = null;
+      state.turnBlocks = [];
       state.tools.clear();
       state.context = null;
       renderTabs();
@@ -695,42 +821,59 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
     switch (event.name) {
       case 'turn_start':
         state.running = true;
-        state.reasoning = null;
-        // Tool ids repeat across turns when a server sends none of its own
-        // (`call_0`, `call_1`), so the map is per turn: keeping it would fold a
-        // new call into last turn's row.
+        state.stopping = false;
+        // Nothing is drawn yet: the core announces every step separately, and a
+        // turn is drawn one step at a time because that is what it is.
         state.tools.clear();
-        state.current = addAssistant();
+        state.turnBlocks = [];
+        state.compaction = null;
+        state.current = null;
         renderRunning();
         break;
-      case 'step_start':
-        if (state.current && data.step) state.current.steps = data.step;
+      case 'step_start': {
+        // A fresh block for this step, appended after everything the previous
+        // steps produced. That is what puts a later "thinking" below the answer
+        // that came before it instead of above it.
+        //
+        // The step before this one is finished, and it is redrawn as finished
+        // here: only the newest block used to be finished off, so every earlier
+        // answer in a multi-step turn kept a spinner and the words "working" for
+        // the rest of the session.
+        for (const earlier of state.turnBlocks) finishBlock(earlier);
+        state.current = addAssistant();
+        state.current.step = Number(data.step) || 0;
+        state.current.maxSteps = Number(data.max_steps) || 0;
+        state.turnBlocks.push(state.current);
+        // Tool ids repeat between steps when a server sends none of its own
+        // (`call_0`, `call_1`), so the map is per step: keeping it would fold a
+        // new call into an earlier step's row.
+        state.tools.clear();
         break;
+      }
       case 'text_delta': {
         // The answer has started, so the scratchpad folds away.
         foldThinking();
-        if (!state.current) state.current = addAssistant();
-        state.current.text += String(data.text || '');
+        const created = activeTurn();
+        created.text += String(data.text || '');
         const following = atBottom();
-        renderAssistant(state.current, true);
+        renderAssistant(created, true);
         scrollIfFollowing(following);
         break;
       }
       case 'assistant_text': {
         foldThinking();
-        if (!state.current) state.current = addAssistant();
-        // The complete text follows the deltas, so it replaces them rather than
-        // being appended: appending would duplicate the whole answer.
-        state.current.text = String(data.text || state.current.text);
-        renderAssistant(state.current, state.running);
+        const created = activeTurn();
+        // The complete text of THIS step follows its own deltas, so it replaces
+        // them rather than being appended: appending would duplicate the answer.
+        // It touches only this step's block, so what an earlier step already
+        // answered stays on screen while the model keeps working.
+        created.text = String(data.text || created.text);
+        renderAssistant(created, state.running);
         break;
       }
       case 'reasoning_delta': {
         const block = reasoningBlock();
         const following = atBottom();
-        // A later step thinks again after answering: it is the same disclosure,
-        // reopened, rather than a second one.
-        if (block.folded) markThinking(block);
         block.body.textContent += String(data.text || '');
         scrollIfFollowing(following);
         break;
@@ -743,11 +886,7 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
         break;
       case 'context_compacted': {
         // The one thing about the context the user cannot see for themselves.
-        addNotice(
-          t(data.summarised ? 'chat.compacted' : 'chat.compactedDropped', {
-            dropped: data.dropped || 0
-          })
-        );
+        noteCompaction(data);
         break;
       }
       case 'conversation_changed': {
@@ -766,10 +905,11 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
       }
       case 'turn_end': {
         state.running = false;
-        if (state.current) {
-          state.current.steps = data.steps || state.current.steps;
-          renderAssistant(state.current, false);
-        }
+        state.stopping = false;
+        // Every block of the turn, not only the last one: a step is finished the
+        // moment the next one begins, and the last block is finished here.
+        for (const block of state.turnBlocks) finishBlock(block);
+        state.turnBlocks = [];
         // How full the window is now, and whether it was measured or estimated.
         if (data.context) {
           state.context = data.context;
@@ -777,13 +917,27 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
         }
         state.current = null;
         renderRunning();
-        if (data.stopped && data.stopped !== 'completed') {
-          toast('warn', t('chat.turnStopped', { reason: data.stopped }));
-        }
+        /*
+         * Why the turn ended, in the transcript where it ended.
+         *
+         * A toast has gone before a reader looks up, and these two reasons are
+         * news the reader needs: "you stopped me" and "I used my whole budget".
+         * The second one offers the way forward, because a turn that ran out of
+         * steps is not a failure - it is a turn that needs another one.
+         */
+        if (data.stopped === 'cancelled') stopNotice('cancelled', 0);
+        else if (data.stopped === 'max_steps') stopNotice('max_steps', Number(data.steps) || 0);
+        input.focus();
         break;
       }
       case 'error':
         state.running = false;
+        state.stopping = false;
+        // A failed turn still leaves finished blocks behind it, and one of them
+        // must not keep saying that it is working.
+        for (const block of state.turnBlocks) finishBlock(block);
+        state.turnBlocks = [];
+        state.current = null;
         renderRunning();
         addError(data.message || t('chat.error'));
         break;
@@ -992,7 +1146,65 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
     const labels = modelLabels(names);
     for (const name of names) picker.append(el('option', { value: name, text: labels.get(name) }));
     picker.value = current;
-    modelHost.append(picker);
+    modelHost.append(picker, reasoningButton());
+  }
+
+  /**
+   * Whether the model reasons before it answers, beside the model itself.
+   *
+   * On is the provider's own default and sends nothing extra, so nothing about a
+   * working endpoint changes. Off is one field - `reasoning_effort: "none"` -
+   * which is how a model that thinks by default (DeepSeek's reasoner, the
+   * o-series) is asked to answer directly; the core drops the field again if a
+   * gateway refuses it, so the switch cannot break a request.
+   *
+   * It sits here rather than in the settings sheet because it is a decision about
+   * the next message, like the model and the mode next to it, not a fact about
+   * the application. A model that reasons is slow and thorough; the same model
+   * with the scratchpad off answers at once, and which one is wanted depends on
+   * the question.
+   */
+  function reasoningButton() {
+    const on = (state.profile || {}).reasoning !== false;
+    return el(
+      'button',
+      {
+        class: 'reasonbtn',
+        type: 'button',
+        dataset: { state: on ? 'on' : 'off' },
+        'aria-pressed': String(on),
+        title: t(on ? 'chat.reasoningOn' : 'chat.reasoningOff'),
+        onclick: () => void toggleReasoning(!on)
+      },
+      // The icon alone: this row is the one place the panel gets dragged narrow,
+      // and a word here would be the first thing to break in half. The title and
+      // `aria-pressed` carry the meaning, and the off state is drawn differently
+      // rather than only said differently.
+      [el('span', { class: 'reasonbtn__icon', html: icon('think') })]
+    );
+  }
+
+  /**
+   * Save the switch into the active profile.
+   *
+   * The core merges a profile patch into the profile it already has, so the
+   * endpoint, the key and the model all survive; only this decision is named. The
+   * chooser is redrawn by hand because the endpoint did not change, and the
+   * window skips a second `/models` call for a profile it already listed.
+   */
+  async function toggleReasoning(reasoning) {
+    const profile = state.profile || {};
+    try {
+      await api.agent.saveProfile({
+        active_profile: profile.id,
+        profile: { id: profile.id, reasoning: reasoning }
+      });
+      await loadState();
+      renderModel();
+      toast('info', t(reasoning ? 'chat.reasoningEnabled' : 'chat.reasoningDisabled'));
+    } catch (error) {
+      toast('error', error.message);
+    }
   }
 
   /**
@@ -1187,8 +1399,10 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
     input.style.height = `${Math.min(180, input.scrollHeight)}px`;
   }
 
-  async function send() {
-    const text = input.value.trim();
+  async function send(preset = '') {
+    // A continuation from the step-limit note arrives this way: the same path as
+    // a typed message, so what was sent is in the transcript either way.
+    const text = String(preset || input.value).trim();
     if (!text || state.running) return;
     const context = messageContext();
     input.value = '';
@@ -1213,10 +1427,22 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
   }
 
   async function cancel() {
+    /*
+     * Ask, then wait.
+     *
+     * The core stops at the next safe point, which can be a whole tool call away,
+     * and the composer stays locked until the turn really ends. Saying "stopping"
+     * for that interval - disabled, in the label of the button that was pressed -
+     * is the difference between a button that does nothing and a button that is
+     * doing something slow.
+     */
+    state.stopping = true;
+    renderRunning();
     try {
       await api.agent.cancel();
-      toast('info', t('chat.stopped'));
     } catch (error) {
+      state.stopping = false;
+      renderRunning();
       toast('error', error.message);
     }
   }
@@ -1268,10 +1494,34 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
     });
     const compactAt = el('input', {
       type: 'text',
-      value: String(Math.round((agentSettings.compact_at ?? 0.75) * 100)),
+      value: agentSettings.compact_at === undefined ? '' : String(Math.round(agentSettings.compact_at * 100)),
       title: t('settings.autoCompactHint')
     });
-    const maxSteps = el('input', { type: 'text', value: String(agentSettings.max_steps ?? 12) });
+    /*
+     * No invented numbers here, and that is a fix rather than a style.
+     *
+     * The step budget had a fallback of 12 while the core's own default is 40, so
+     * a form opened before the settings arrived - or on a file that never had the
+     * key - showed 12 and saved 12: the agent then ended every turn after a dozen
+     * steps, which reads as "the model stops for no reason". A field that the core
+     * owns is filled from the core, and left empty and unsent when the core has
+     * not said.
+     */
+    const maxSteps = el('input', {
+      type: 'text',
+      value: agentSettings.max_steps === undefined ? '' : String(agentSettings.max_steps),
+      title: t('settings.maxStepsHint'),
+      dataset: { role: 'maxSteps' }
+    });
+    const maxHistory = el('input', {
+      type: 'text',
+      value:
+        agentSettings.max_history_messages === undefined
+          ? ''
+          : String(agentSettings.max_history_messages),
+      title: t('settings.maxHistoryHint'),
+      dataset: { role: 'maxHistory' }
+    });
     const commandTimeout = el('input', { type: 'text', value: String(agentSettings.command_timeout ?? 120) });
     const autoApprove = el('input', { type: 'checkbox', checked: Boolean(agentSettings.auto_approve) });
     const approveWrites = el('input', { type: 'checkbox', checked: Boolean(agentSettings.approve_writes) });
@@ -1291,8 +1541,9 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
         },
         agent: {
           max_steps: Number(maxSteps.value) || undefined,
+          max_history_messages: Number(maxHistory.value) || undefined,
           command_timeout: Number(commandTimeout.value) || undefined,
-          compact_at: (Number(compactAt.value) || 75) / 100,
+          compact_at: Number(compactAt.value) ? Number(compactAt.value) / 100 : undefined,
           auto_approve: autoApprove.checked,
           approve_writes: approveWrites.checked,
           approve_commands: approveCommands.checked
@@ -1466,6 +1717,7 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
       field(t('settings.maxOutput'), maxOutput),
       field(t('settings.autoCompact'), compactAt),
       field(t('settings.maxSteps'), maxSteps),
+      field(t('settings.maxHistory'), maxHistory),
       field(t('settings.commandTimeout'), commandTimeout),
       field(t('settings.language'), language),
       field(t('settings.theme'), theme),
@@ -1704,7 +1956,7 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
   async function reload() {
     clear(transcript);
     state.current = null;
-    state.reasoning = null;
+    state.turnBlocks = [];
     state.tools.clear();
     state.approvals.clear();
     state.modeOpen = false;

@@ -499,7 +499,14 @@ textarea {
   opacity: 0.55;
 }
 
-.main {
+/*
+ * The window's main pane. Written as `main.main` rather than `.main` because
+ * Monaco's suggestion widget has an inner `<div class="main">` of its own, and a
+ * bare class selector reached it: the widget's `.left` and `.right` columns were
+ * laid out as a column instead of a row, so the signature overlapped the name.
+ * Measured with `scripts/probe-suggest-style.cjs` (`gap: -64` before the fix).
+ */
+main.main {
   position: relative;
   display: flex;
   flex-direction: column;
@@ -1179,6 +1186,18 @@ kbd {
   display: grid;
   gap: 2px;
   padding: 0 6px 6px;
+  /*
+   * A step that called forty tools is read inside this box, not by dragging the
+   * whole conversation past it.
+   *
+   * Without a ceiling the expanded rows pushed everything below them off the
+   * bottom of the transcript, and the reader - who had asked to see them - could
+   * not reach the end of the list at all. The list scrolls itself instead, and
+   * the panel follows its newest row while a step is still running.
+   */
+  max-height: 320px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .toolrow {
@@ -1370,6 +1389,37 @@ kbd {
   border-radius: var(--radius-sm);
   color: var(--text-faint);
   font-size: 11px;
+}
+
+/*
+ * A turn that ended for a reason, rather than "done".
+ *
+ * These are the notes a reader has to be able to find afterwards: "you stopped
+ * me" and "I used my whole budget". The budget note also carries the button that
+ * carries on, which is why the line is a row rather than a sentence.
+ */
+.notice--stopped {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text-dim);
+}
+
+.notice--stopped[data-reason='cancelled'] {
+  border-color: var(--danger);
+}
+
+.notice--stopped .btn {
+  flex: 0 0 auto;
+  height: 22px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
+/* What the turn did to the conversation to keep it inside the window. */
+.notice--compaction {
+  border-style: dotted;
 }
 
 .composer {
@@ -1804,10 +1854,59 @@ kbd {
    * row that can be shortened without losing a word somebody needs, so it takes
    * the whole of any deficit down to a pill that still says which model it is.
    */
+  display: flex;
+  align-items: center;
+  gap: 4px;
   flex: 0 1 auto;
   min-width: 72px;
-  max-width: 180px;
+  max-width: 220px;
   overflow: hidden;
+}
+
+/*
+ * Whether the model reasons before it answers.
+ *
+ * On is a quiet pill in the accent colour, because it is the default and needs
+ * no attention; off is dashed and dimmed, which is the same shape the window
+ * uses for a capability that has been turned off. A bare icon would leave the
+ * state to the tooltip alone, and a state nobody can see is a state nobody
+ * trusts.
+ */
+.reasonbtn {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--accent-soft);
+  border-radius: 13px;
+  background: var(--surface-2);
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.reasonbtn:hover {
+  border-color: var(--accent);
+  background: var(--surface-3);
+}
+
+.reasonbtn[data-state='off'] {
+  border-style: dashed;
+  border-color: var(--border-strong);
+  color: var(--text-faint);
+}
+
+.reasonbtn__icon {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+}
+
+.reasonbtn__icon svg {
+  width: 100%;
+  height: 100%;
 }
 
 .modelbtn {
@@ -1828,6 +1927,21 @@ kbd {
   border-color: var(--accent);
   background: var(--surface-3);
   color: var(--text);
+}
+
+/*
+ * The model gives way first; the reasoning switch beside it keeps its size.
+ *
+ * The chooser still fills the box the layout gives it - `width: 100%` above says
+ * so - but that box is now shared with the switch, so the chooser takes the
+ * remainder instead of the whole line. Written after `.modelbtn` on purpose: the
+ * rule is more specific than the one it adjusts, and the window's own test reads
+ * the chooser's rule by name.
+ */
+.modelhost .modelbtn {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
 }
 
 .modelnone {
@@ -2268,4 +2382,37 @@ kbd {
 .monaco-editor .margin,
 .monaco-editor-background {
   background: var(--bg) !important;
+}
+
+/*
+ * Monaco measures its own lines; the window must not tell it how tall they are.
+ *
+ * `body` sets `line-height: 1.5` for the chrome, and that value was inherited
+ * into the editor and into the suggestion widget, which is a child of it. Monaco
+ * laid its rows out at 18px (its own `lineHeight` for a 13px font) while the
+ * inherited value made the boxes 19.5px, so the list came out misaligned and its
+ * detail column collapsed. Measured with `scripts/probe-suggest-style.cjs`:
+ * `bodyLineHeight: "19.5px"` against `editorLineHeight: 18`. The editor states
+ * its own line height on the elements it draws, so `normal` here only stops the
+ * chrome's value from reaching the parts it does not.
+ */
+.monaco-editor,
+.monaco-editor .suggest-widget,
+.monaco-editor .monaco-list-row {
+  line-height: normal;
+}
+
+/*
+ * `hidden` has to win, and by default it does not.
+ *
+ * The browser's own `[hidden] { display: none }` is weaker than any author rule
+ * that gives an element a display of its own - `.btn`, `.spinner`, `.reasonbtn` -
+ * so an element the code hid stayed on screen. Two of them were reported together
+ * and looked like two broken features: the spinner kept turning after the actions
+ * said "done", and the Stop button never went away after a turn had finished, so
+ * it looked like a button that did nothing. One rule at the end of the stylesheet
+ * settles it for every element, present and future.
+ */
+[hidden] {
+  display: none;
 }

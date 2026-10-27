@@ -423,6 +423,47 @@ class ContextCompactionTest(LoopTestCase):
         self.assertLessEqual(len(loop.messages), 10)
         self.assertGreaterEqual(event["dropped"], 1)
 
+    def test_a_turn_pays_for_a_summary_once(self) -> None:
+        """One turn buys one summary, however many steps it takes.
+
+        A single step's tool results can fill the window on their own, so a
+        many-step turn used to send a summarising request before nearly every step:
+        the same conversation compressed again and again, each time with a note
+        saying so, and each time billed. The first compaction in a turn still asks
+        the model; the rest make room by dropping the oldest messages, which keeps
+        the request inside the window at no cost.
+        """
+
+        messages = [
+            {"role": "assistant" if index % 2 else "user", "content": "x" * self.MESSAGE}
+            for index in range(6)
+        ]
+        loop, client = self.small_window(
+            [text_chunks("summary of the earlier turns")] * 4, history=messages
+        )
+
+        results = [loop._compact()]
+        for _ in range(3):
+            # What the next steps of the same turn do: they fill the window again.
+            loop._history.extend(
+                {"role": "user", "content": "y" * self.MESSAGE} for _ in range(3)
+            )
+            results.append(loop._compact())
+
+        self.assertTrue(results[0], "a full window must be compacted")
+        self.assertTrue(any(results[1:]), "a later step must still make room")
+        summaries = [call for call in client.calls if call["tools"] is None]
+        self.assertEqual(len(summaries), 1, "only the first compaction may ask the model")
+
+        events = [data for kind, data in self.events if kind == "context_compacted"]
+        self.assertTrue(events[0]["summarised"])
+        for event in events[1:]:
+            self.assertFalse(event["summarised"])
+            self.assertEqual(event["reason"], "window")
+        # The summary is the last thing to go: it is what an earlier compaction
+        # decided was worth remembering.
+        self.assertTrue(loop.messages[0]["content"].startswith(SUMMARY_MARKER))
+
 
 if __name__ == "__main__":
     unittest.main()

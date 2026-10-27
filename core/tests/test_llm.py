@@ -116,6 +116,39 @@ class StreamingTest(unittest.TestCase):
             list(client.stream([], [tool_schema("t", "d", {}, [])]))
         self.assertNotIn("tools", seen)
 
+    def test_reasoning_on_sends_no_field_at_all(self) -> None:
+        """The default must leave the request exactly as it was.
+
+        An endpoint that has never heard of ``reasoning_effort`` would answer 400,
+        and turning a setting on by omitting it is the only way to promise that
+        nothing about a working profile changes.
+        """
+
+        seen: dict = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.update(json.loads(request.content))
+            return httpx.Response(200, content=sse({"choices": [{"delta": {"content": "ok"}}]}))
+
+        with client_for(handler) as client:
+            list(client.stream([]))
+        self.assertNotIn("reasoning_effort", seen)
+
+    def test_reasoning_off_is_stated_as_none(self) -> None:
+        """Off is a field, because a model that reasons by default cannot be told
+        to stop by silence: ``reasoning_effort: "none"`` is what both DeepSeek and
+        the o-series read as "answer directly"."""
+
+        seen: dict = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.update(json.loads(request.content))
+            return httpx.Response(200, content=sse({"choices": [{"delta": {"content": "ok"}}]}))
+
+        with client_for(handler, profile(reasoning=False)) as client:
+            list(client.stream([]))
+        self.assertEqual(seen["reasoning_effort"], "none")
+
     def test_reasoning_field_is_captured_separately(self) -> None:
         def handler(_request: httpx.Request) -> httpx.Response:
             return httpx.Response(200, content=sse(
@@ -176,6 +209,48 @@ class ErrorHandlingTest(unittest.TestCase):
             with self.assertRaises(ProviderError) as caught:
                 list(client.stream([]))
         self.assertIn("cannot reach", str(caught.exception))
+
+    def test_reasoning_field_rejection_is_retried_without_it(self) -> None:
+        """A gateway that predates the field refuses it instead of ignoring it.
+
+        The switch must not be able to break an endpoint that was working: the
+        request is sent again without the field, and only when the refusal names
+        it.
+        """
+
+        attempts: list[dict] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            body = json.loads(request.content)
+            attempts.append(body)
+            if "reasoning_effort" in body:
+                return httpx.Response(
+                    400, json={"error": {"message": "unknown field: reasoning_effort"}}
+                )
+            return httpx.Response(200, content=sse({"choices": [{"delta": {"content": "ok"}}]}))
+
+        with client_for(handler, profile(reasoning=False)) as client:
+            chunks = list(client.stream([]))
+
+        self.assertEqual(len(attempts), 2)
+        self.assertNotIn("reasoning_effort", attempts[1])
+        self.assertEqual("".join(chunk.text for chunk in chunks), "ok")
+
+    def test_an_unresolvable_400_is_reported_rather_than_retried(self) -> None:
+        """A refusal that names nothing we sent is the provider's answer, not a
+        hint to start guessing: it is raised, once."""
+
+        attempts: list[dict] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            attempts.append(json.loads(request.content))
+            return httpx.Response(400, json={"error": {"message": "context length exceeded"}})
+
+        with client_for(handler, profile(reasoning=False)) as client:
+            with self.assertRaises(ProviderError) as caught:
+                list(client.stream([]))
+        self.assertEqual(len(attempts), 1)
+        self.assertEqual(caught.exception.status, 400)
 
     def test_vendor_keepalive_text_is_ignored(self) -> None:
         body = b": keep-alive\n\ndata: not-json\n\n" + sse(

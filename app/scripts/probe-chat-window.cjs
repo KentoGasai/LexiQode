@@ -52,6 +52,13 @@ function stub() {
       } catch {
         stream = false;
       }
+      // What the request carried about reasoning. The switch beside the model is
+      // only real if it reaches the wire, and this is the only place that can say
+      // whether it did: the window can draw a convincing pill either way.
+      if (requests.length) {
+        requests[requests.length - 1].reasoning_effort =
+          asked.reasoning_effort === undefined ? null : asked.reasoning_effort;
+      }
       if (stream) {
         response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
         // Paced deliberately: a stub that answers instantly makes the whole turn
@@ -61,46 +68,62 @@ function stub() {
         const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
         const send = (delta) =>
           response.write(`data: ${JSON.stringify({ choices: [{ delta }] })}\n\n`);
-        // A turn shaped like a real one: the model thinks, asks for a read-only
-        // tool, reads the result and answers. The reasoning arrives on its own
-        // field, which is what a reasoning model does and what the panel has to
-        // fold away instead of printing as the answer.
-        const usedTool = (asked.messages || []).some((message) => message.role === 'tool');
-        if (!usedTool) {
+        /*
+         * A turn shaped like a real one: the model thinks, asks for read-only
+         * tools, reads the results and answers. The reasoning arrives on its own
+         * field, which is what a reasoning model does and what the panel has to
+         * fold away instead of printing as the answer.
+         *
+         * Three tool steps and then an answer, rather than one: that is what a
+         * turn needs in order to run out of a small step budget, which is the only
+         * way to see the note that says so and the button that carries on.
+         */
+        const messages = asked.messages || [];
+        const assistantTurns = messages.filter((message) => message.role === 'assistant').length;
+        // "slow" in the newest question makes every piece arrive late, which is
+        // what gives a probe time to press Stop while a turn is really running.
+        const lastUser = [...messages].reverse().find((message) => message.role === 'user');
+        const slow = /slow/i.test(String((lastUser || {}).content || ''));
+        const gap = slow ? 700 : 200;
+        if (assistantTurns < 3) {
           await pause(300);
           for (const piece of ['The question needs ', 'a look at the project ', 'before I answer.']) {
             send({ reasoning_content: piece });
-            await pause(200);
+            await pause(gap);
           }
           send({ content: 'Let me look at the project first. ' });
-          await pause(300);
+          await pause(gap);
+          /*
+           * Twelve calls in one step, on purpose.
+           *
+           * The complaint was not that actions were drawn badly but that a long
+           * list could not be read to its end: the expanded rows pushed the rest
+           * of the turn out of the panel's reach. One call would never show that,
+           * so the stub makes a step that fills the list.
+           */
+          const calls = Array.from({ length: 12 }, (_, index) => ({
+            index,
+            id: 'call_probe_' + (index + 1),
+            type: 'function',
+            function: {
+              name: 'glob',
+              arguments: JSON.stringify({ pattern: '*.md', note: 'probe row ' + (index + 1) })
+            }
+          }));
           response.write(
             `data: ${JSON.stringify({
-              choices: [
-                {
-                  delta: {
-                    tool_calls: [
-                      {
-                        index: 0,
-                        id: 'call_probe_1',
-                        type: 'function',
-                        function: { name: 'glob', arguments: JSON.stringify({ pattern: '*.md' }) }
-                      }
-                    ]
-                  }
-                }
-              ]
+              choices: [{ delta: { tool_calls: calls } }]
             })}\n\n`
           );
           response.write(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'tool_calls' }] })}\n\n`);
         } else {
           for (const piece of ['The listing is ', 'enough to answer.']) {
             send({ reasoning_content: piece });
-            await pause(200);
+            await pause(gap);
           }
           for (const piece of ['The ', 'stub ', 'answered.']) {
             send({ content: piece });
-            await pause(120);
+            await pause(slow ? 900 : 120);
           }
           response.write(
             `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: 'stop' }] })}\n\n`
@@ -217,6 +240,22 @@ async function main() {
         modelField.dispatchEvent(new Event('input', { bubbles: true }));
       }
       steps.beforeSave = { modelField: modelField.value };
+      /*
+       * A small step budget, on purpose.
+       *
+       * The note that says a turn ran out of steps - and the button that carries
+       * on from it - only exists when a turn really hits the ceiling, so the probe
+       * asks for a ceiling three steps away and the stub spends them.
+       */
+      const budgetField = sheet.querySelector('[data-role="maxSteps"]');
+      steps.budgetField = {
+        present: Boolean(budgetField),
+        value: budgetField ? budgetField.value : '(no field)'
+      };
+      if (budgetField) {
+        budgetField.value = '3';
+        budgetField.dispatchEvent(new Event('input', { bubbles: true }));
+      }
       const saveAndTest = [...sheet.querySelectorAll('.btn')].find((node) => node.className.includes('primary'));
       if (!saveAndTest) return { failed: 'the save button was not found', steps };
       saveAndTest.click();
@@ -230,6 +269,8 @@ async function main() {
         modelFromCore: afterSave.profile ? afterSave.profile.model : null,
         baseUrlFromCore: afterSave.profile ? afterSave.profile.base_url : null,
         hasKey: afterSave.profile ? afterSave.profile.has_api_key : null,
+        // What the core made of the budget the form was given.
+        maxStepsFromCore: afterSave.agent ? afterSave.agent.max_steps : null,
         statusbar: statusbar(),
         modelField: modelField.value
       };
@@ -283,16 +324,22 @@ async function main() {
       // While the turn runs: the scratchpad is open and the tools line says it is
       // working. A folded-away thinking block that was never open is not the same
       // thing, and only a sample taken during the turn can tell them apart.
+      //
+      // Every assistant block of the turn is watched, not only the newest one: the
+      // turn is drawn step by step, so the scratchpad and the tools of the first
+      // step live in an earlier block than the answer being waited for.
       const mid = {
         reasoningOpenWhileThinking: null,
         reasoningLabelWhileThinking: '',
         toolsLabelWhileRunning: '(never seen)',
-        toolsOpenWhileRunning: null
+        toolsOpenWhileRunning: null,
+        blocksSeen: 0
       };
       for (let attempt = 0; attempt < 200; attempt += 1) {
         await sleep(80);
-        const turn = [...document.querySelectorAll('.turn--assistant')].pop();
-        const reasoning = turn ? turn.querySelector('details.reasoning') : null;
+        const turns = [...document.querySelectorAll('.turn--assistant')];
+        mid.blocksSeen = Math.max(mid.blocksSeen, turns.length);
+        const reasoning = turns.map((turn) => turn.querySelector('details.reasoning')).find(Boolean);
         if (reasoning && mid.reasoningOpenWhileThinking === null) {
           mid.reasoningOpenWhileThinking = reasoning.open;
           mid.reasoningLabelWhileThinking = reasoning
@@ -300,7 +347,7 @@ async function main() {
             .textContent.replace(/\\s+/g, ' ')
             .trim();
         }
-        const tools = turn ? turn.querySelector('details.tools') : null;
+        const tools = turns.map((turn) => turn.querySelector('details.tools')).find(Boolean);
         if (tools && mid.toolsLabelWhileRunning === '(never seen)') {
           mid.toolsLabelWhileRunning = tools
             .querySelector('summary')
@@ -332,7 +379,11 @@ async function main() {
         body = turn ? turn.querySelector('.turn__body') : null;
         answered = body ? body.textContent.replace(/\\s+/g, ' ').trim() : '';
         const stop = document.getElementById('composer-stop');
-        if (/stub answered/.test(answered) && stop && stop.hidden) break;
+        // Waiting for "the turn is over" rather than for a particular answer: this
+        // first turn is meant to run out of its three steps, so its last words are
+        // a tool step's, not a conclusion. The answer is checked where it belongs,
+        // after the "carry on" button has been pressed.
+        if (stop && stop.hidden) break;
       }
       steps.turn = {
         rawEvents: rawEvents.slice(0, 40),
@@ -387,6 +438,168 @@ async function main() {
       const modelItem = document.querySelector('.statusbar__item[data-role="model"]');
       steps.turn.statusbarModel = modelItem ? modelItem.textContent.trim() : '(no model item)';
       steps.turn.statusbar = statusbar();
+
+      // ------------------------------------------------- the turn, step by step
+      // A turn that answers, calls a tool and answers again is three things, and
+      // the panel draws each step as its own block. What matters is the order:
+      // every later scratchpad has to come after the answer it follows, and an
+      // answer already given has to survive the next step. Both were reported
+      // wrong, so both are measured.
+      const blocks = [...document.querySelectorAll('.turn--assistant')];
+      const answerOf = (block) => {
+        const body = block ? block.querySelector('.turn__body') : null;
+        return body ? body.textContent.replace(/\\s+/g, ' ').trim() : '';
+      };
+      const secondThinking = blocks.length > 1 ? blocks[1].querySelector('details.reasoning') : null;
+      const rowsBoxes = [...document.querySelectorAll('.tools__rows')];
+      const rowsBox = rowsBoxes.length ? rowsBoxes[rowsBoxes.length - 1] : null;
+      steps.stepsLayout = {
+        blocks: blocks.length,
+        answers: blocks.map(answerOf),
+        perBlock: blocks.map((block) => ({
+          reasoning: Boolean(block.querySelector('details.reasoning')),
+          tools: block.querySelectorAll('.toolrow').length,
+          answer: answerOf(block).slice(0, 80)
+        })),
+        secondThinkingAfterFirstAnswer:
+          secondThinking && blocks[0]
+            ? Boolean(blocks[0].compareDocumentPosition(secondThinking) & Node.DOCUMENT_POSITION_FOLLOWING)
+            : null,
+        stepLabels: [...document.querySelectorAll('.turn__meta')]
+          .map((node) => node.textContent.replace(/\\s+/g, ' ').trim())
+          .filter(Boolean),
+        // A finished step must stop saying that it is working. Only the newest
+        // block used to be finished off, so earlier answers kept a spinner.
+        blocksStillWorking: blocks.filter((block) => block.querySelector('.turn__meta .spinner')).length,
+        toolsBoxMaxHeight: rowsBox ? getComputedStyle(rowsBox).maxHeight : '(no tools box)'
+      };
+
+      /*
+       * The list of actions, read the way the person who complained tried to read
+       * it: is it contained, can it be scrolled to the end, and did the panel
+       * leave it showing its newest row?
+       */
+      const transcriptBox = document.getElementById('transcript');
+      steps.toolsBox = rowsBox
+        ? {
+            rows: rowsBox.querySelectorAll('.toolrow').length,
+            clientHeight: rowsBox.clientHeight,
+            scrollHeight: rowsBox.scrollHeight,
+            scrollTop: rowsBox.scrollTop,
+            scrollable: rowsBox.scrollHeight > rowsBox.clientHeight + 1,
+            atEnd: rowsBox.scrollHeight - rowsBox.scrollTop - rowsBox.clientHeight < 8,
+            transcriptAtEnd:
+              transcriptBox.scrollHeight - transcriptBox.scrollTop - transcriptBox.clientHeight < 8
+          }
+        : null;
+
+      // The reasoning switch: what it says, and what one click does to it and to
+      // the core's profile. The window can draw a convincing pill whether or not
+      // anything is saved, so the profile is read back and a second message is
+      // sent, which is the only way to see the switch reach the wire.
+      const reasonBtn = document.querySelector('.reasonbtn');
+      steps.switch = {
+        present: Boolean(reasonBtn),
+        state: reasonBtn ? reasonBtn.getAttribute('data-state') : '(missing)',
+        pressed: reasonBtn ? reasonBtn.getAttribute('aria-pressed') : '(missing)',
+        title: reasonBtn ? reasonBtn.title : ''
+      };
+      if (reasonBtn) {
+        const before = reasonBtn.getAttribute('aria-pressed');
+        reasonBtn.click();
+        for (let attempt = 0; attempt < 40; attempt += 1) {
+          await sleep(150);
+          const now = document.querySelector('.reasonbtn');
+          if (now && now.getAttribute('aria-pressed') !== before) break;
+        }
+        const after = document.querySelector('.reasonbtn');
+        steps.switch.afterPressed = after ? after.getAttribute('aria-pressed') : '(missing)';
+        steps.switch.afterState = after ? after.getAttribute('data-state') : '(missing)';
+        const snapshot = await window.lexiqode.agent.state().catch((error) => ({ error: error.message }));
+        steps.switch.coreReasoning = snapshot.profile ? snapshot.profile.reasoning : '(no profile)';
+
+        const composer = document.getElementById('composer-input');
+        composer.value = 'answer again';
+        composer.dispatchEvent(new Event('input', { bubbles: true }));
+        const again = document.getElementById('composer-send');
+        if (again) again.click();
+        for (let attempt = 0; attempt < 150; attempt += 1) {
+          await sleep(200);
+          const stop = document.getElementById('composer-stop');
+          const now = document.querySelectorAll('.turn--assistant').length;
+          if (stop && stop.hidden && now > blocks.length) break;
+        }
+        steps.switch.blocksAfterSecondMessage = document.querySelectorAll('.turn--assistant').length;
+      }
+
+      // ------------------------------------------- the step limit, and stopping
+      // Two things a reader has to be able to see: that a turn ended because its
+      // budget ran out, with a way to carry on; and that pressing Stop did
+      // something. Both were reported as broken, so both are measured here.
+      const limitNotice = document.querySelector('.notice--stopped[data-reason="max_steps"]');
+      steps.stepLimit = {
+        notice: limitNotice ? limitNotice.textContent.trim().slice(0, 160) : '',
+        hasContinue: limitNotice ? Boolean(limitNotice.querySelector('button')) : false
+      };
+      const beforeContinue = document.querySelectorAll('.turn--assistant').length;
+      const continueButton = limitNotice ? limitNotice.querySelector('button') : null;
+      if (continueButton) {
+        continueButton.click();
+        for (let attempt = 0; attempt < 120; attempt += 1) {
+          await sleep(150);
+          const stop = document.getElementById('composer-stop');
+          const now = document.querySelectorAll('.turn--assistant').length;
+          if (stop && stop.hidden && now > beforeContinue) break;
+        }
+      }
+      const afterContinue = [...document.querySelectorAll('.turn--assistant')];
+      const lastTurn = afterContinue[afterContinue.length - 1] || null;
+      const lastBody = lastTurn ? lastTurn.querySelector('.turn__body') : null;
+      steps.continued = {
+        pressed: Boolean(continueButton),
+        blocks: afterContinue.length,
+        answer: lastBody ? lastBody.textContent.replace(/\\s+/g, ' ').trim().slice(0, 90) : ''
+      };
+
+      // Stopping, on a turn the stub paces slowly enough to catch in flight.
+      const composerInput = document.getElementById('composer-input');
+      composerInput.value = 'slow answer';
+      composerInput.dispatchEvent(new Event('input', { bubbles: true }));
+      const sendAgain = document.getElementById('composer-send');
+      if (sendAgain) sendAgain.click();
+      const stopping = { clicked: false, label: '', disabled: null };
+      for (let attempt = 0; attempt < 150; attempt += 1) {
+        await sleep(40);
+        const stop = document.getElementById('composer-stop');
+        if (stop && getComputedStyle(stop).display !== 'none' && !stop.disabled) {
+          stop.click();
+          stopping.clicked = true;
+          break;
+        }
+      }
+      const stoppingNow = document.getElementById('composer-stop');
+      stopping.label = stoppingNow ? stoppingNow.textContent.trim() : '';
+      stopping.disabled = stoppingNow ? stoppingNow.disabled : null;
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        await sleep(100);
+        const stop = document.getElementById('composer-stop');
+        const send = document.getElementById('composer-send');
+        if (stop && getComputedStyle(stop).display === 'none' && send && !send.disabled) break;
+      }
+      const stoppedNotice = document.querySelector('.notice--stopped[data-reason="cancelled"]');
+      const sendAfterStop = document.getElementById('composer-send');
+      const stopAfterStop = document.getElementById('composer-stop');
+      steps.stopping = {
+        clicked: stopping.clicked,
+        labelWhileStopping: stopping.label,
+        disabledWhileStopping: stopping.disabled,
+        notice: stoppedNotice ? stoppedNotice.textContent.trim().slice(0, 140) : '',
+        stopButtonDisplay: stopAfterStop ? getComputedStyle(stopAfterStop).display : '(missing)',
+        sendEnabled: sendAfterStop ? !sendAfterStop.disabled : null,
+        visibleSpinners: [...document.querySelectorAll('.spinner')].filter(
+          (node) => getComputedStyle(node).display !== 'none'
+        ).length
+      };
 
       // ---------------------------------------------------------------- chats
       // A chat is a document in the core: a second one opens in a second tab, the
@@ -493,6 +706,109 @@ async function main() {
     `);
 
     console.log(`\n--- steps\n${JSON.stringify(report, null, 2)}`);
+
+    /*
+     * What this probe now insists on, rather than only describing.
+     *
+     * Every one of these is a way the panel has actually been wrong: an answer
+     * erased by the step that followed it, a later scratchpad drawn above an
+     * earlier answer, a switch that changed nothing on the wire, and an action
+     * list that could not be read to the end.
+     */
+    const problems = [];
+    const layout = report.stepsLayout || {};
+    const toggle = report.switch || {};
+    const calls = requests.filter((entry) => entry.url.endsWith('/chat/completions'));
+    const firstCall = calls[0] || {};
+    const lastCall = calls[calls.length - 1] || {};
+
+    if (layout.blocks < 2) {
+      problems.push(`the stub's two-step turn was drawn as ${layout.blocks} block(s)`);
+    }
+    if (layout.secondThinkingAfterFirstAnswer !== true) {
+      problems.push("the second step's thinking does not come after the first step's answer");
+    }
+    if (!/project first/.test(layout.answers && layout.answers[0] ? layout.answers[0] : '')) {
+      problems.push("the first step's answer is not in the transcript");
+    }
+    if (!layout.blocks || layout.blocks < 3) {
+      problems.push('the three tool steps of the first turn are not three blocks');
+    }
+    if (layout.toolsBoxMaxHeight === 'none' || layout.toolsBoxMaxHeight === '(no tools box)') {
+      problems.push('the action list is not contained, so a long step pushes the turn out of reach');
+    }
+    if (layout.blocksStillWorking) {
+      problems.push(`${layout.blocksStillWorking} finished step(s) still say they are working`);
+    }
+    const box = report.toolsBox;
+    if (!box) {
+      problems.push('the step\'s actions are not on the page at all');
+    } else {
+      if (box.rows < 12) problems.push(`only ${box.rows} of the step's 12 actions were drawn`);
+      if (!box.scrollable) {
+        problems.push('twelve actions fit without scrolling, so this probe proves nothing about a long list');
+      }
+      if (!box.atEnd) {
+        problems.push('the list of actions is not left showing its newest row');
+      }
+      if (!box.transcriptAtEnd) {
+        problems.push('the transcript is not left at the end of the turn');
+      }
+      if (box.clientHeight > 400) {
+        problems.push(`the list of actions is ${box.clientHeight}px tall, which is not a ceiling`);
+      }
+    }
+
+    const limit = report.stepLimit || {};
+    if (!limit.notice) problems.push('a turn that ran out of steps said nothing about it');
+    if (!limit.hasContinue) problems.push('the step-limit note offers no way to carry on');
+    const budget = report.afterSave || {};
+    if (budget.maxStepsFromCore !== 3) {
+      problems.push(`the budget the form was given reached the core as ${budget.maxStepsFromCore}`);
+    }
+    const continued = report.continued || {};
+    if (!continued.pressed) {
+      problems.push('the "carry on" button was never there to press');
+    } else if (!/stub answered/.test(continued.answer || '')) {
+      problems.push(`carrying on produced no answer: ${JSON.stringify(continued.answer)}`);
+    }
+
+    const stopping = report.stopping || {};
+    if (!stopping.clicked) problems.push('the stop button was never on screen while a turn was running');
+    if (!/стоп|останавл|stop/i.test(stopping.labelWhileStopping || '')) {
+      problems.push(`the stop button does not say it is stopping: ${JSON.stringify(stopping.labelWhileStopping)}`);
+    }
+    if (!stopping.disabledWhileStopping) problems.push('the stop button stays pressable while stopping');
+    if (!stopping.notice) problems.push('nothing in the transcript says the turn was stopped');
+    if (stopping.stopButtonDisplay !== 'none') {
+      problems.push('the stop button stays on screen after a turn has finished');
+    }
+    if (stopping.sendEnabled !== true) problems.push('the composer does not come back after stopping');
+    if (stopping.visibleSpinners) {
+      problems.push(`${stopping.visibleSpinners} spinner(s) are still turning after the turn ended`);
+    }
+    if (!toggle.present) problems.push('there is no reasoning switch beside the model');
+    if (toggle.pressed !== 'true') problems.push(`the reasoning switch starts as ${toggle.pressed}, not on`);
+    if (toggle.afterPressed !== 'false' || toggle.afterState !== 'off') {
+      problems.push('clicking the switch does not turn reasoning off on screen');
+    }
+    if (toggle.coreReasoning !== false) problems.push("the switch never reached the core's profile");
+    if (firstCall.reasoning_effort) {
+      problems.push(`reasoning on sent reasoning_effort=${firstCall.reasoning_effort}, which changes nothing`);
+    }
+    if (lastCall.reasoning_effort !== 'none') {
+      problems.push(`reasoning off sent reasoning_effort=${lastCall.reasoning_effort}, not "none"`);
+    }
+
+    if (problems.length) {
+      console.error(`\n${problems.length} failed expectation(s):`);
+      for (const line of problems) console.error(`  - ${line}`);
+      process.exitCode = 1;
+    } else {
+      console.log(
+        '\nthe turn is drawn step by step, the earlier answer survives, and the reasoning switch reaches the wire'
+      );
+    }
   } finally {
     child.kill();
     server.close();

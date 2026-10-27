@@ -39,6 +39,19 @@ function loadMonaco() {
   return monacoPromise;
 }
 
+/**
+ * The line height Monaco should use for a given font size.
+ *
+ * Monaco's own default is `round(fontSize * 1.4)` - 18px at the default size of
+ * 13 - and this repeats it rather than leaving the option unset, because unset
+ * means "inherit", and what was inherited was `body`'s `line-height: 1.5`. The
+ * editor then drew 19.5px lines while Monaco measured 18px ones, and the
+ * suggestion widget, which is laid out from those measurements, came out wrong.
+ */
+function lineHeightFor(fontSize) {
+  return Math.round(fontSize * 1.4);
+}
+
 const THEMES = {
   dark: {
     base: 'vs-dark',
@@ -107,6 +120,26 @@ export async function createEditor({ api, settings, onDirtyChange, onActiveChang
     fixedOverflowWidgets: true,
     padding: { top: 8, bottom: 12 },
     /**
+     * The font, stated rather than inherited.
+     *
+     * Monaco measures the suggestion widget with the *editor's* font metrics but
+     * paints the rows in a monospace font of its own. Left unset, `fontFamily`
+     * fell through to `body`'s UI font (`--font`), so the widget was sized for a
+     * proportional face while the text inside it was monospaced and wider: rows
+     * were clipped and the detail column collapsed to nothing. Measured with
+     * `scripts/probe-suggest-style.cjs` - the editor reported the UI font while
+     * the label reported Consolas. Naming the same monospace stack the rest of
+     * the window uses (`--mono`) makes the two agree.
+     *
+     * `lineHeight` is pinned for the same reason: `body`'s `line-height: 1.5`
+     * was inherited into the editor (19.5px) while Monaco laid its rows out at
+     * 18px, so the two disagreed about how tall a line is. It is derived from the
+     * font size rather than fixed, because the size is a setting (8-40) and a
+     * constant would crowd the lines at the top of that range.
+     */
+    fontFamily: '"Cascadia Code", "JetBrains Mono", Consolas, ui-monospace, monospace',
+    lineHeight: lineHeightFor(13),
+    /**
      * Suggestions, stated rather than inherited.
      *
      * Monaco's defaults already suggest words from the document while typing, but
@@ -139,6 +172,7 @@ export async function createEditor({ api, settings, onDirtyChange, onActiveChang
     const appearance = currentSettings().appearance;
     editor.updateOptions({
       fontSize: appearance.fontSize,
+      lineHeight: lineHeightFor(appearance.fontSize),
       tabSize: appearance.tabSize,
       minimap: { enabled: appearance.minimap },
       wordWrap: appearance.wordWrap,
@@ -466,6 +500,67 @@ export async function createEditor({ api, settings, onDirtyChange, onActiveChang
   }
 
   editor.onDidChangeCursorPosition(() => onActiveChange?.(tabs.get(active) || null, editor.getPosition()));
+
+  /**
+   * The suggestion list, made to appear while someone is typing.
+   *
+   * `quickSuggestions` is Monaco's own promise to do this and it is set above,
+   * but it was measured and the promise does not always hold: typing `col` into a
+   * CSS file offered *nothing* in one run and seven selectors in the next, and in
+   * the empty-handed run the very same text produced all seven the moment the
+   * list was asked for by name. The language service was still starting, and
+   * Monaco's automatic path had already given up on it - while a probe that asked
+   * for the list by hand reported suggestions and hid the gap for a whole release.
+   *
+   * So the list is asked for here, and asked for twice: at once, so the common
+   * case feels immediate, and once more after a pause, which is what covers a
+   * service that was still coming up. Four rules keep this from becoming noise.
+   * Only a single character counts (a paste inserts many and is not typing); only
+   * a character that can begin a name counts; a list that is already open is left
+   * to Monaco; and inside a comment or a string nothing is asked for at all,
+   * because the option above says those are not places suggestions belong and an
+   * explicit request would otherwise bypass that.
+   */
+  const STARTS_A_NAME = /[0-9A-Za-z_$\u0400-\u04ff]/;
+  const SUGGEST_AFTER_MS = [80, 600];
+  let suggestTimers = [];
+
+  function suggestIsOpen() {
+    return Boolean(document.querySelector('.suggest-widget.visible'));
+  }
+
+  /** Whether the caret sits in a comment or a string, read from the tokenizer. */
+  function insideProse() {
+    const model = editor.getModel();
+    const position = editor.getPosition();
+    if (!model || !position) return false;
+    try {
+      const tokens = monaco.editor.tokenize(model.getLineContent(position.lineNumber), model.getLanguageId())[0] || [];
+      let type = '';
+      for (const token of tokens) {
+        if (token.offset > position.column - 1) break;
+        type = token.type;
+      }
+      return /comment|string/.test(type);
+    } catch {
+      // A language whose tokenizer refuses is not a reason to withhold the list.
+      return false;
+    }
+  }
+
+  function askForSuggestions() {
+    if (suggestIsOpen() || !editor.getModel() || !editor.hasTextFocus()) return;
+    editor.trigger('lexiqode', 'editor.action.triggerSuggest', {});
+  }
+
+  editor.onDidType((typed) => {
+    for (const timer of suggestTimers) clearTimeout(timer);
+    suggestTimers = [];
+    if (typed.length !== 1) return;
+    if (!STARTS_A_NAME.test(typed) && typed !== '.') return;
+    if (suggestIsOpen() || insideProse()) return;
+    suggestTimers = SUGGEST_AFTER_MS.map((delay) => setTimeout(askForSuggestions, delay));
+  });
 
   applyOptions();
   renderTabs();

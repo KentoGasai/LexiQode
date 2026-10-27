@@ -132,6 +132,8 @@ test('the settings form sends only the fields the core documents', () => {
     'command_timeout',
     // AgentSettings: when the conversation is compacted.
     'compact_at',
+    // AgentSettings: the hard ceiling on messages in one conversation.
+    'max_history_messages',
     'auto_approve',
     'approve_writes',
     'approve_commands'
@@ -263,6 +265,49 @@ test('the settings have a button in the status bar', () => {
   assert.match(source, /role: 'settings'/, 'the status bar should carry a settings item');
   assert.match(source, /icon: 'settings'/, 'as an icon, so the bar does not gain a word');
   assert.match(source, /statusNodes\.settings,/, 'and the item has to be appended to the bar');
+});
+
+/**
+ * `hidden` has to be able to win.
+ *
+ * The browser's own `[hidden] { display: none }` loses to any author rule that
+ * gives an element a display of its own, and two of those were reported together
+ * as broken features: the spinner kept turning after the actions said "done", and
+ * the Stop button never went away after a turn had finished, which is how a
+ * working button looks dead. The rule that settles it has to come after the rules
+ * it overrides, or it settles nothing.
+ */
+test('the stylesheet lets `hidden` beat the rules that give an element a display', () => {
+  const css = fs.readFileSync(path.join(RENDERER, 'css', 'app.css'), 'utf8');
+  const rule = css.indexOf('\n[hidden] {');
+  assert.notEqual(rule, -1, 'app.css should say what `hidden` means');
+  assert.ok(
+    rule > css.indexOf('\n.spinner {'),
+    'the spinner sets a display of its own, so the rule has to come after it'
+  );
+  assert.ok(rule > css.indexOf('\n.btn {'), 'and after the buttons');
+  assert.match(css.slice(rule, rule + 40), /display:\s*none/);
+});
+
+/**
+ * A number the core owns is never invented by the form.
+ *
+ * The step budget was filled in with 12 while the core's own default is 40, so a
+ * form opened before the settings arrived showed 12 and saved 12 - and the agent
+ * then ended every turn after a dozen steps, reported as "the model stops for no
+ * reason". An absent value means "the core decides", which is what the form has
+ * to send when the core has not told it anything.
+ */
+test('the settings form does not invent the values the core owns', () => {
+  const source = fs.readFileSync(path.join(JS, 'chat.js'), 'utf8');
+  assert.doesNotMatch(source, /max_steps \?\? \d+/, 'the step budget must come from the core');
+  assert.match(source, /max_steps === undefined/, 'and be left empty when the core has not said');
+  assert.match(source, /max_history_messages/, 'the message ceiling has a field of its own');
+  assert.doesNotMatch(
+    source,
+    /compact_at: \(Number\(compactAt\.value\) \|\| 75\)/,
+    'the compaction threshold may not be invented either'
+  );
 });
 
 /**

@@ -122,6 +122,8 @@ class AgentLoop:
         #: Messages that always survive, however little room is left: the newest
         #: exchange is what the turn is about.
         self._min_kept = 4
+        #: Whether this turn has already paid for a summary. See :meth:`_compact`.
+        self._summarised_this_turn = False
         # Whether the current turn may call tools. Inline edits turn this off so
         # the answer is a single piece of text the editor can insert directly.
         self._tools_enabled = True
@@ -148,6 +150,7 @@ class AgentLoop:
     # ------------------------------------------------------------------ the loop
     def run(self, user_text: str, *, tools: bool = True, mode: AgentMode | None = None) -> LoopResult:
         self._cancel.clear()
+        self._summarised_this_turn = False
         self._mode = mode or get_mode(None)
         self._tools_enabled = bool(tools) and self.profile.supports_tools and self._mode.tools != ()
         self._history.append(user_message(user_text))
@@ -420,6 +423,14 @@ class AgentLoop:
         ``compact_at`` is applied. When the window is the binding limit the dropped
         part is compressed by the model first, so a long session keeps its
         decisions instead of losing them silently.
+
+        The summary is written once per turn, not once per step. A single step that
+        reads a dozen files can fill the window on its own, so a many-step turn
+        used to pay for a summarising request before nearly every step: the same
+        conversation compressed again and again, each time with the note that says
+        so. After the first summary the rest of the turn drops the oldest messages
+        instead - it costs nothing, it keeps the request inside the window just as
+        well, and the note says plainly that this part was dropped.
         """
 
         window = int(self.profile.context_window or 0)
@@ -435,9 +446,13 @@ class AgentLoop:
         if cut <= 0:
             return False
 
+        if self._summarised_this_turn:
+            return self._drop_oldest(cut, before, window)
+
         dropped = self._history[:cut]
         self._history = self._history[cut:]
         summary = self._summarise(dropped)
+        self._summarised_this_turn = True
         if summary:
             note = f"{SUMMARY_MARKER} {summary}"
         else:
@@ -454,6 +469,42 @@ class AgentLoop:
                 "dropped": len(dropped),
                 "kept": len(self._history),
                 "summarised": bool(summary),
+                "tokens_before": before,
+                "tokens_after": self._prompt_estimate(),
+                "context_window": window,
+            },
+        )
+        return True
+
+    def _drop_oldest(self, cut: int, before: int, window: int) -> bool:
+        """Make room by dropping the oldest messages, without a model call.
+
+        The summary at the head is the most valuable message in the conversation -
+        it is what an earlier compaction decided was worth remembering - so it is
+        kept whenever anything else is being thrown away. That is why the drop
+        starts at index one rather than at zero.
+        """
+
+        history = self._history
+        head = str(history[0].get("content", "")) if history else ""
+        keeps_summary = head.startswith(SUMMARY_MARKER)
+        if keeps_summary and cut <= 1:
+            return False
+        if keeps_summary:
+            dropped = history[1:cut]
+            self._history = [history[0], *history[cut:]]
+        else:
+            dropped = history[:cut]
+            self._history = history[cut:]
+        if not dropped:
+            return False
+        self._emit(
+            "context_compacted",
+            {
+                "reason": "window",
+                "dropped": len(dropped),
+                "kept": len(self._history),
+                "summarised": False,
                 "tokens_before": before,
                 "tokens_after": self._prompt_estimate(),
                 "context_window": window,

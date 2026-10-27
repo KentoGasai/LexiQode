@@ -1,19 +1,26 @@
 /**
- * Does the editor suggest anything while code is being written?
+ * Does the editor suggest anything while a person is typing?
  *
- * The question is not answerable from the sources. Monaco suggests from two
- * places: a language service, which runs in a worker and knows what `addNumbers`
- * takes and returns, and a document-word provider, which suggests words that
- * appear elsewhere in the same file. The first cannot work unless the worker the
- * editor asks for exists, and a worker that fails to start is silent - the window
- * then looks exactly like an editor that simply has nothing to suggest.
+ * The question is not answerable from the sources, and it was answered wrongly
+ * once by a probe that looked convincing. That probe typed a prefix through the
+ * editor's own command and then, if no list had appeared, asked for the list by
+ * name (`editor.action.triggerSuggest`) before reading it - so it reported
+ * suggestions that existed only because it had asked. A person typing saw
+ * nothing, and the measurement agreed with the code instead of the person.
  *
- * So this probe types into a real window and reads the widget a person would see,
- * and separately asks for the TypeScript worker directly, because those two can
- * disagree: the service may be dead while the word provider still answers.
+ * So this probe types with real key events, through the same input path a
+ * keyboard uses, and reads the widget *without* asking for it. What it finds
+ * automatically is the honest answer to the question; the asked-for list is
+ * measured separately, because a widget that only appears on request is a
+ * different, lesser feature and must be named as such rather than conflated.
  *
- * Nothing of the repository is touched: the probe writes two small files into a
- * temporary folder and opens that folder.
+ * It also reads the widget's geometry and what is painted at its centre: a list
+ * that exists in the DOM, is marked visible and is nevertheless covered by
+ * something else is exactly how "the hints do not appear" happens while every
+ * DOM-based check passes.
+ *
+ * Nothing of the repository is touched: two small files are written into a
+ * temporary folder and that folder is opened.
  *
  * Run: node scripts/probe-editor-suggest.cjs
  */
@@ -22,7 +29,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { connect, listTargets, startApp, waitForDom } = require('./probe-harness.cjs');
+const { connect, listTargets, sleep, startApp, waitForDom } = require('./probe-harness.cjs');
 
 const PORT = Number(process.env.LEXIQODE_PROBE_PORT || 9338);
 
@@ -64,7 +71,176 @@ function makeFolder() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lexiqode-suggest-'));
   fs.writeFileSync(path.join(root, 'calc.js'), JAVASCRIPT, 'utf8');
   fs.writeFileSync(path.join(root, 'calc.py'), PYTHON, 'utf8');
+  /*
+   * The rest of the table below, written so the probe can say where suggestions
+   * can exist and where they cannot. A language Monaco tokenises has no service
+   * and suggests only words already in the file, so an *empty* file of such a
+   * language has nothing to offer at all - which is not a defect and must not be
+   * reported as one either.
+   */
+  fs.writeFileSync(path.join(root, 'styles.css'), '.column {\n  display: flex;\n}\n\n.column__inner {\n  color: #333;\n}\n', 'utf8');
+  fs.writeFileSync(path.join(root, 'page.html'), '<div class="card">\n  <span class="card__title"></span>\n</div>\n', 'utf8');
+  fs.writeFileSync(path.join(root, 'notes.md'), '# Заметки\n\nThe calculation of totals is described here, in order.\n', 'utf8');
+  fs.writeFileSync(path.join(root, 'setup.ps1'), 'param($Path)\n\nfunction Get-Summary {\n  param([string]$Name)\n  return $Name\n}\n', 'utf8');
+  fs.writeFileSync(path.join(root, 'fresh.py'), '', 'utf8');
   return root;
+}
+
+/**
+ * Every file worth asking about, and what may honestly be expected of it.
+ *
+ * `suggests` is the expectation: true means a list must appear while typing.
+ * A file whose language has neither a service nor any word in it yet is marked
+ * false, and the probe then only reports what happened instead of failing on a
+ * feature that does not exist anywhere.
+ */
+const FILES = [
+  { file: 'calc.js', language: 'javascript', typed: 'addNum', suggests: true, why: 'the TypeScript service knows the module' },
+  { file: 'calc.py', language: 'python', typed: 'calc', suggests: true, why: 'the name is already in the file' },
+  { file: 'styles.css', language: 'css', typed: 'col', suggests: true, why: 'the CSS service knows the selectors' },
+  { file: 'page.html', language: 'html', typed: 'car', suggests: true, why: 'the HTML service knows the classes' },
+  { file: 'notes.md', language: 'markdown', typed: 'calc', suggests: true, why: 'the word is already in the file' },
+  { file: 'setup.ps1', language: 'powershell', typed: 'Summ', suggests: true, why: 'the name is already in the file' },
+  { file: 'fresh.py', language: 'python', typed: 'def', suggests: false, why: 'an empty file of a language with no service' }
+];
+
+/**
+ * The keyboard, as Chromium sees it.
+ *
+ * Only the keys this probe needs are described. A letter carries the code of its
+ * *upper*-case key, which is what a real keyboard reports, while the text is the
+ * lower-case letter - so the character arrives exactly as a keystroke delivers it.
+ */
+function keyFor(character) {
+  if (character === '\n') return { key: 'Enter', code: 'Enter', vk: 13, text: '\r' };
+  if (character === '.') return { key: '.', code: 'Period', vk: 190, text: '.' };
+  const upper = character.toUpperCase();
+  const shifted = /[A-Z]/.test(character);
+  return {
+    key: character,
+    code: `Key${upper}`,
+    vk: upper.charCodeAt(0),
+    text: character,
+    modifiers: shifted ? 8 : 0
+  };
+}
+
+async function press(session, character) {
+  const described = keyFor(character);
+  const common = {
+    modifiers: described.modifiers || 0,
+    key: described.key,
+    code: described.code,
+    windowsVirtualKeyCode: described.vk,
+    nativeVirtualKeyCode: described.vk
+  };
+  await session.send('Input.dispatchKeyEvent', {
+    type: 'keyDown',
+    text: described.text,
+    unmodifiedText: described.text,
+    ...common
+  });
+  await session.send('Input.dispatchKeyEvent', { type: 'keyUp', ...common });
+  await sleep(55);
+}
+
+/** A key that inserts nothing: Escape, or Ctrl+Space. */
+async function pressRaw(session, { key, code, vk, modifiers = 0 }) {
+  const common = { modifiers, key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk };
+  await session.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...common });
+  await session.send('Input.dispatchKeyEvent', { type: 'keyUp', ...common });
+  await sleep(120);
+}
+
+/**
+ * What is on screen, read from the page rather than assumed by this file.
+ *
+ * `covered` is the part that matters: it asks the document which element is
+ * painted at the middle of the widget, so a list that is present and visible but
+ * hidden behind another element is reported as covered rather than as working.
+ */
+const MEASURE = `
+  const widget = document.querySelector('.suggest-widget');
+  const rows = widget
+    ? [...widget.querySelectorAll('.monaco-list-row')].map((row) => row.textContent.trim()).slice(0, 12)
+    : [];
+  const rect = widget ? widget.getBoundingClientRect() : null;
+  let covered = null;
+  if (rect && rect.width > 4 && rect.height > 4) {
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + Math.min(10, rect.height / 2);
+    const hit = document.elementFromPoint(x, y);
+    covered = hit
+      ? widget.contains(hit)
+        ? 'the widget itself'
+        : (hit.id || hit.className || hit.tagName)
+      : 'nothing';
+  }
+  const editors = window.monaco.editor.getEditors ? window.monaco.editor.getEditors() : [];
+  const editor = editors[0];
+  const model = editor ? editor.getModel() : null;
+  return {
+    visible: Boolean(widget && widget.classList.contains('visible')),
+    rows,
+    rect: rect ? {
+      top: Math.round(rect.top),
+      left: Math.round(rect.left),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height)
+    } : null,
+    covered,
+    language: model ? model.getLanguageId() : '',
+    tail: model ? model.getValue().slice(-24) : ''
+  };
+`;
+
+/** Open a file from the tree, the way a person does, and leave the caret at its end. */
+function openAndPlaceCaret(name) {
+  return `
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const row = [...document.querySelectorAll('.tree__row[data-kind="file"]')]
+      .find((entry) => entry.dataset.path === ${JSON.stringify(name)});
+    if (!row) return false;
+    row.click();
+    await sleep(1200);
+    const editor = window.monaco.editor.getEditors()[0];
+    if (!editor) return false;
+    editor.focus();
+    const model = editor.getModel();
+    const last = model.getLineCount();
+    editor.setPosition({ lineNumber: last, column: model.getLineMaxColumn(last) });
+    return true;
+  `;
+}
+
+/** Type a prefix into the open file and report both the free and the asked-for list. */
+async function suggestionsFor(session, typed) {
+  // Close anything left open by the previous file, so a stale widget cannot be
+  // read as this file's answer.
+  await pressRaw(session, { key: 'Escape', code: 'Escape', vk: 27 });
+  await session.evaluate(`
+    const editor = window.monaco.editor.getEditors()[0];
+    editor.focus();
+    const model = editor.getModel();
+    const last = model.getLineCount();
+    editor.setPosition({ lineNumber: last, column: model.getLineMaxColumn(last) });
+    return true;
+  `);
+  await press(session, '\n');
+  await sleep(220);
+  for (const character of typed) await press(session, character);
+  await sleep(700);
+  const automatic = await session.evaluate(MEASURE);
+
+  // Only when the list did not come by itself: ask for it, so the two answers can
+  // be told apart instead of being averaged into one misleading "it works".
+  let requested = null;
+  if (!automatic.visible) {
+    await pressRaw(session, { key: ' ', code: 'Space', vk: 32, modifiers: 2 });
+    await sleep(700);
+    requested = await session.evaluate(MEASURE);
+  }
+  return { automatic, requested };
 }
 
 async function main() {
@@ -76,93 +252,68 @@ async function main() {
     const target = await listTargets(PORT);
     const session = await connect(target.webSocketDebuggerUrl);
     await waitForDom(session);
-    const report = await session.evaluate(`
+    await session.evaluate(`
       const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-      const q = (selector) => document.querySelector(selector);
-      const qa = (selector) => [...document.querySelectorAll(selector)];
-      const out = {};
-
-      // A settle delay, so a failure cannot be blamed on opening a file in the
-      // first milliseconds of the window's life unless that is really the cause.
-      await sleep(${Number(process.env.LEXIQODE_PROBE_SETTLE_MS || 0)});
       await window.lexiqode.workspace.open(${JSON.stringify(folder)});
       for (let attempt = 0; attempt < 60; attempt += 1) {
-        if (q('.tree__row')) break;
+        if (document.querySelector('.tree__row')) break;
         await sleep(250);
       }
+      return Boolean(document.querySelector('.tree__row'));
+    `);
+    const monacoVersion = await session.evaluate(
+      'return window.monaco ? window.monaco.version : "not loaded";'
+    );
 
-      out.monaco = window.monaco ? window.monaco.version : 'not loaded';
+    /*
+     * Every file in the table, opened the way a person opens it, typed into with
+     * real keys. A file that cannot be opened is reported as such and the run
+     * continues: the value of this probe is the whole picture.
+     */
+    const results = [];
+    for (const entry of FILES) {
+      const opened = await session.evaluate(openAndPlaceCaret(entry.file));
+      if (!opened) {
+        results.push({ ...entry, opened: false });
+        continue;
+      }
+      const measured = await suggestionsFor(session, entry.typed);
+      results.push({ ...entry, opened: true, ...measured });
+    }
 
-      /* Open a file from the tree, the way a person does. */
-      const openFromTree = async (name) => {
-        const row = qa('.tree__row[data-kind="file"]').find((entry) => entry.dataset.path === name);
-        if (!row) return false;
-        row.click();
-        await sleep(1200);
-        return true;
-      };
-
-      /*
-       * Type a prefix and read what the widget offers.
-       *
-       * \`editor.trigger\` is the editor's own entry point for keystrokes, so the
-       * suggestion arrives the way a typed letter makes it arrive rather than by
-       * a provider being called by hand.
-       */
-      const suggestionsFor = async (typed) => {
-        const editors = window.monaco.editor.getEditors ? window.monaco.editor.getEditors() : [];
-        const editor = editors[0];
-        if (!editor) return { error: 'no editor instance' };
-        editor.focus();
-        const model = editor.getModel();
-        if (!model) return { error: 'no model' };
-        // At the end of the file, where the module's own names are in scope.
-        const last = model.getLineCount();
-        editor.setPosition({ lineNumber: last, column: model.getLineMaxColumn(last) });
-        editor.trigger('probe', 'type', { text: '\\n' + typed });
-        await sleep(800);
-        const before = q('.suggest-widget');
-        if (!before || !before.classList.contains('visible')) {
-          editor.trigger('probe', 'editor.action.triggerSuggest', {});
-          await sleep(800);
-        }
-        const widget = q('.suggest-widget');
-        return {
-          visible: Boolean(widget && widget.classList.contains('visible')),
-          rows: widget ? qa('.suggest-widget .monaco-list-row').map((row) => row.textContent.trim()).slice(0, 12) : [],
-          language: model.getLanguageId()
-        };
-      };
-
-      out.openedJavaScript = await openFromTree('calc.js');
-      out.javascript = await suggestionsFor('addNum');
-
-      out.openedPython = await openFromTree('calc.py');
-      out.python = await suggestionsFor('calc');
-
-      /*
-       * Diagnostics, which only a language service produces.
-       *
-       * The marker set is the honest answer to "is the service running": word
-       * suggestions appear without any service at all, so the widget alone cannot
-       * tell the two apart.
-       */
-      await sleep(1500);
-      out.markers = window.monaco.editor.getModelMarkers({}).map((marker) => ({
-        resource: String(marker.resource && marker.resource.path || ''),
-        severity: marker.severity,
+    // Diagnostics, which only a language service produces. Word suggestions
+    // appear without any service at all, so the widget alone cannot tell a
+    // running service from a dead one.
+    await sleep(1500);
+    const markers = await session.evaluate(`
+      return window.monaco.editor.getModelMarkers({}).map((marker) => ({
+        resource: String((marker.resource && marker.resource.path) || ''),
         message: String(marker.message).slice(0, 120)
       })).slice(0, 6);
-
-      return out;
     `);
-    console.log(JSON.stringify(report, null, 2));
 
-    console.log(`\nmonaco: ${report.monaco}`);
-    console.log(`markers from the service: ${(report.markers || []).length}`);
-    console.log(`javascript suggestions: ${report.javascript.rows.length}`);
-    console.log(`python suggestions: ${report.python.rows.length}`);
-    const workerNoise = lines.filter((line) => /worker/i.test(line) && /error|fail|not found|could not/i.test(line));
+    console.log(JSON.stringify({ monaco: monacoVersion, results, markers }, null, 2));
+
+    console.log(`\nmonaco: ${monacoVersion}`);
+    console.log('file          language    while typing        asked for   painted under        first rows');
+    for (const result of results) {
+      if (!result.opened) {
+        console.log(`${result.file.padEnd(13)} -           did not open`);
+        continue;
+      }
+      const automatic = result.automatic.visible ? `${result.automatic.rows.length} row(s)` : 'nothing';
+      const asked = result.requested ? `${result.requested.rows.length} row(s)` : '-';
+      console.log(
+        `${result.file.padEnd(13)} ${String(result.automatic.language).padEnd(11)} ` +
+          `${automatic.padEnd(19)} ${asked.padEnd(11)} ${String(result.automatic.covered).padEnd(20)} ` +
+          `${result.automatic.rows.slice(0, 3).join(', ')}`
+      );
+    }
+    console.log(`markers from the service: ${markers.length}`);
+
+    const workerNoise = lines.filter(
+      (line) => /worker/i.test(line) && /error|fail|not found|could not/i.test(line)
+    );
     if (workerNoise.length) {
       console.log('\nwhat the window said about the worker:');
       for (const line of workerNoise.slice(0, 6)) console.log(`  ${line.slice(0, 300)}`);
@@ -171,19 +322,40 @@ async function main() {
     /*
      * The expectations, stated so this is a check rather than a report.
      *
-     * A language service is what produces the markers: word suggestions appear
-     * without any service at all, so the widget alone cannot tell a working
-     * service from a dead one. A service that fails to start says nothing in the
-     * window, which is exactly how it went unnoticed.
+     * The first one is the whole point: a list must appear while someone types,
+     * with nothing asked for. A widget that is present but covered fails too,
+     * because to the person looking at the window that is indistinguishable from
+     * absent.
+     *
+     * A failed worker load is reported and counted, and only fails the run when
+     * the run also lacked suggestions or diagnostics - which is the case it
+     * matters in. It is otherwise known to appear intermittently in both the
+     * development and the packaged layout while every feature still answers,
+     * because Monaco abandons a worker it started and starts another; failing on
+     * it would make this check flicker rather than measure.
      */
     const loadFailures = lines.filter((line) => /failed to load/i.test(line)).length;
     const problems = [];
-    if (report.javascript.language !== 'javascript') problems.push(`calc.js opened as ${report.javascript.language}`);
-    if (report.python.language !== 'python') problems.push(`calc.py opened as ${report.python.language}`);
-    if (!report.javascript.rows.length) problems.push('no suggestion was offered for addNum in a .js file');
-    if (!report.python.rows.length) problems.push('no suggestion was offered for calc in a .py file');
-    if (!(report.markers || []).length) problems.push('the language service reported nothing at all, so it is not running');
-    if (loadFailures) problems.push(`a worker failed to load (${loadFailures} line(s) in the window output)`);
+    for (const result of results) {
+      if (!result.opened) {
+        problems.push(`${result.file} could not be opened from the tree`);
+        continue;
+      }
+      if (result.automatic.language !== result.language) {
+        problems.push(`${result.file} opened as ${result.automatic.language}`);
+      }
+      if (!result.suggests) continue;
+      if (!result.automatic.visible) problems.push(`no suggestion appeared while typing in ${result.file}`);
+      if (!result.automatic.rows.length) problems.push(`the list was empty while typing in ${result.file}`);
+      if (result.automatic.covered && result.automatic.covered !== 'the widget itself') {
+        problems.push(`the list in ${result.file} is painted under ${result.automatic.covered}`);
+      }
+    }
+    if (!markers.length) problems.push('the language service reported nothing at all, so it is not running');
+    if (loadFailures && !markers.length) {
+      problems.push(`a worker failed to load (${loadFailures} line(s)) and nothing took its place`);
+    }
+    if (loadFailures) console.log(`note: a worker failed to load ${loadFailures} time(s) while everything still answered`);
 
     if (problems.length) {
       console.error(`\n${problems.length} failed expectation(s):`);
@@ -191,7 +363,7 @@ async function main() {
       process.exitCode = 1;
       return;
     }
-    console.log('\nthe editor suggests from the document and from a running language service');
+    console.log('\nthe list appears by itself while typing, and the service is running');
   } finally {
     child.kill();
     // The window watches this folder while it is open: a refusal to remove it now
