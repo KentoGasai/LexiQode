@@ -114,10 +114,46 @@ export async function createEditor({ api, settings, onDirtyChange, onActiveChang
     monaco.editor.setTheme(theme);
   }
 
+  /**
+   * Name -> language id, from the registry Monaco actually has.
+   *
+   * The registry is the only authority worth asking: the tokenizers and the
+   * language services register themselves in it, and what it holds differs
+   * between Monaco versions. It is walked once, lazily, because it is filled by
+   * the time the editor is created and re-walking it per tab would be waste.
+   */
+  let languageTable = null;
+  function languages() {
+    if (languageTable) return languageTable;
+    languageTable = { filenames: new Map(), extensions: new Map() };
+    for (const entry of monaco.languages.getLanguages()) {
+      for (const filename of entry.filenames || []) languageTable.filenames.set(filename.toLowerCase(), entry.id);
+      for (const extension of entry.extensions || []) languageTable.extensions.set(extension.toLowerCase(), entry.id);
+    }
+    return languageTable;
+  }
+
+  /**
+   * The language id for a path.
+   *
+   * This used to return the file's *extension* and call it a language. `.js` is
+   * not a language id and neither is `.py`, so every JavaScript, Python,
+   * Markdown, YAML and PowerShell file was opened as plain text: no colours and
+   * no language service. Only `.json`, `.css` and `.html` looked right, and only
+   * because for those three the extension and the id happen to be the same
+   * word - which is also why the mistake survived as long as it did.
+   *
+   * A name the registry knows wins over the extension, so `Dockerfile`,
+   * `Makefile` and `CMakeLists.txt` are recognised for what they are.
+   */
   function languageFor(path) {
-    const extension = path.slice(path.lastIndexOf('.') + 1).toLowerCase();
-    const known = monaco.languages.getLanguages().some((entry) => (entry.extensions || []).includes(`.${extension}`));
-    return known ? extension : 'plaintext';
+    const name = String(path).slice(String(path).lastIndexOf('/') + 1).toLowerCase();
+    const table = languages();
+    const byName = table.filenames.get(name);
+    if (byName) return byName;
+    const dot = name.lastIndexOf('.');
+    if (dot <= 0) return 'plaintext';
+    return table.extensions.get(name.slice(dot)) || 'plaintext';
   }
 
   function isDirty(path) {
