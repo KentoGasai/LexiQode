@@ -245,7 +245,10 @@ async function main() {
         groups: text('#settings-body .settings__group h3'),
         controls: qa('#settings-body select, #settings-body input, #settings-body textarea').length,
         updateBlock: qa('#settings-body .settings__update').length,
-        versionLine: text('#settings-body .settings__update .settings__note')
+        versionLine: text('#settings-body .settings__update .settings__note'),
+        // The updates section offers one thing: the page. A download or an
+        // install button here is what this measurement exists to catch.
+        updateButtons: qa('#settings-body .settings__update button').map((button) => button.textContent.trim())
       };
       if (fontSizeRow) {
         const input = fontSizeRow.querySelector('input[type="number"]');
@@ -351,6 +354,14 @@ async function main() {
   expect(report && report.settings.opened, 'Ctrl+, did not open the settings');
   expect(report && report.settings.controls >= 20, 'the settings dialog drew almost no controls');
   expect(report && report.settings.updateBlock === 1, 'the settings have no updates section');
+      expect(
+        report && report.settings.updateButtons.some((label) => /выпуск|release/i.test(label)),
+        'the updates section has no way to reach the release page'
+      );
+      expect(
+        report && !report.settings.updateButtons.some((label) => /скачать|download|установ|install/i.test(label)),
+        'the updates section still offers to download or install, which this application does not do'
+      );
   expect(report && report.settings.fontSize && report.settings.fontSize.after !== report.settings.fontSize.before, 'a setting changed in the dialog was not saved');
   expect(report && report.settings.fontSize && report.settings.fontSize.restored === report.settings.fontSize.before, 'the probe left the setting changed');
   expect(report && report.settings.closed, 'Escape did not close the settings');

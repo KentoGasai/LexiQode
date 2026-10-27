@@ -2140,20 +2140,6 @@ kbd {
   border-radius: var(--radius-sm);
 }
 
-.settings__progress {
-  height: 6px;
-  border-radius: 3px;
-  background: var(--surface-2);
-  overflow: hidden;
-}
-
-.settings__progress > span {
-  display: block;
-  height: 100%;
-  background: var(--accent);
-  transition: width 0.2s linear;
-}
-
 /* Release notes are text from GitHub: shown as it is, never as markup. */
 .update__notes {
   max-height: 240px;

@@ -108,9 +108,7 @@ const api = {
   },
   update: {
     state: () => call(CHANNELS.update.state),
-    check: (options) => call(CHANNELS.update.check, options || {}),
-    download: () => call(CHANNELS.update.download),
-    install: () => call(CHANNELS.update.install)
+    check: (options) => call(CHANNELS.update.check, options || {})
   },
   app: {
     i18n: () => call(CHANNELS.app.i18n),

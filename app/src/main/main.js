@@ -141,9 +141,6 @@ function buildServices() {
     settings,
     currentVersion: app.getVersion(),
     repository: githubSlug(PACKAGE.repository && (PACKAGE.repository.url || PACKAGE.repository)),
-    packaged: app.isPackaged,
-    installDir: path.dirname(app.getPath('exe')),
-    dataDir: path.join(app.getPath('userData'), 'updates'),
     fetchImpl: (url, options) => net.fetch(url, options),
     onState: (state) => send(CHANNELS.update.progress, state),
     onLog: (line) => console.log(line)
@@ -346,14 +343,7 @@ function createWindow() {
     agent,
     updates,
     watcher: services.watcher,
-    windowOf: () => mainWindow,
-    /**
-     * Leaving for an update is the ordinary shutdown: the agent is stopped and
-     * the shells are closed by the `before-quit` handler, which is exactly what
-     * the swap script is waiting for. It waits on this process id, so the update
-     * cannot begin while the app is alive.
-     */
-    quitForUpdate: () => app.quit()
+    windowOf: () => mainWindow
   });
 
   mainWindow.on('maximize', () => services.send(CHANNELS.window.state, { maximized: true }));

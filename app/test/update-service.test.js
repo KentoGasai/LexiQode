@@ -1,33 +1,25 @@
 'use strict';
 
 /**
- * Checking for a release, fetching it, and the script that installs it.
+ * Looking for a release, and pointing at it.
  *
- * The parts worth testing are the ones that decide what a user is offered and
- * what happens to their installation: which release counts as newer, which asset
- * belongs to this machine, what the window is told at each step, and the order
- * of operations in the script that replaces the application folder. The last one
- * cannot be exercised here - it renames the folder this test runs from - so its
- * contract is read out of the file instead: wait for the process, unpack fully,
- * move aside rather than delete, put the old version back if the new one cannot
- * take its place.
+ * The parts worth testing are the ones that decide what a user is told: which
+ * release counts as newer, what happens when there is none to find, and - most
+ * of all - that this service cannot touch the machine. The first version could:
+ * it downloaded the archive and handed a detached script the job of replacing
+ * the application folder, and a window started from source refused with a
+ * message nobody could act on. The checks below hold the line that replaced it:
+ * one HTTP request, one comparison, and a page for the user to visit.
  */
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 
-const {
-  UpdateService,
-  compareVersions,
-  githubSlug,
-  parseVersion,
-  pickArchive,
-  readUpdaterScript
-} = require('../src/main/update-service');
+const { UpdateService, compareVersions, githubSlug, parseVersion } = require('../src/main/update-service');
 
+const APP = path.resolve(__dirname, '..');
 const REPO = 'owner/name';
 
 function store(overrides = {}) {
@@ -42,30 +34,22 @@ function service(options = {}) {
     // An explicit empty repository means "nothing is configured", which is a
     // different case from a caller that did not name one.
     repository: options.repository === undefined ? REPO : options.repository,
-    packaged: options.packaged === true,
-    installDir: options.installDir || path.join(os.tmpdir(), 'lexiqode-test-install'),
-    dataDir: options.dataDir || fs.mkdtempSync(path.join(os.tmpdir(), 'lexiqode-update-test-')),
     fetchImpl: options.fetchImpl,
-    spawnImpl: options.spawnImpl,
     onState: options.onState,
     onLog: options.onLog
   });
 }
 
-function release(tag, assets = [], extra = {}) {
+function release(tag, extra = {}) {
   return {
     tag_name: tag,
     body: 'What changed.',
     html_url: `https://github.com/${REPO}/releases/tag/${tag}`,
     prerelease: false,
     draft: false,
-    assets,
+    assets: [],
     ...extra
   };
-}
-
-function asset(name, size = 1024) {
-  return { name, size, browser_download_url: `https://example.test/${name}` };
 }
 
 /** A fetch that answers the same thing for every call. */
@@ -119,47 +103,39 @@ test('a repository is read out of every shape a package declares it in', () => {
   assert.equal(githubSlug(undefined), '');
 });
 
-test('the archive for this machine is the one that matches it', () => {
-  const assets = [
-    asset('LexiQode-0.3.0-linux-x64.zip'),
-    asset('LexiQode-0.3.0-win32-x64.zip', 4096),
-    asset('LexiQode-0.2.0-win32-x64.zip')
-  ];
-  const chosen = pickArchive(release('v0.3.0', assets), { version: '0.3.0', platform: 'win32', arch: 'x64' });
-  assert.equal(chosen.name, 'LexiQode-0.3.0-win32-x64.zip');
-  assert.equal(chosen.size, 4096);
-});
-
-test('an archive is still offered when its name is not exactly ours', () => {
-  const forThis = { version: '0.3.0', platform: 'win32', arch: 'x64' };
-  assert.equal(pickArchive(release('v0.3.0', [asset('LexiQode-win32-x64.zip')]), forThis).name, 'LexiQode-win32-x64.zip');
-  assert.equal(pickArchive(release('v0.3.0', [asset('bundle.zip')]), forThis).name, 'bundle.zip');
-  assert.equal(pickArchive(release('v0.3.0', []), forThis), null);
-  // The name is reported for what it is, so the window can say the archive does
-  // not claim to be for this machine instead of installing it in silence.
-  assert.equal(pickArchive(release('v0.3.0', [asset('bundle.zip')]), forThis).matchesPlatform, false);
-  assert.equal(pickArchive(release('v0.3.0', [asset('LexiQode-0.3.0-win32-x64.zip')]), forThis).matchesPlatform, true);
-});
-
-test('a newer release is offered with its own archive', async () => {
+test('a newer release is reported with the page that has it', async () => {
   const phases = [];
   const updates = service({
     onState: (state) => phases.push(state.phase),
-    fetchImpl: answering(release('v0.3.0', [asset('LexiQode-0.3.0-win32-x64.zip', 2048)]))
+    fetchImpl: answering(release('v0.3.0'))
   });
   const state = await updates.check();
   assert.equal(state.phase, 'available');
   assert.equal(state.version, '0.3.0');
   assert.equal(state.current, '0.2.0');
   assert.equal(state.repo, REPO);
-  assert.equal(state.asset.name, 'LexiQode-0.3.0-win32-x64.zip');
+  assert.equal(state.url, `https://github.com/${REPO}/releases/tag/v0.3.0`);
+  assert.equal(state.page, state.url);
+  assert.match(state.notes, /What changed/);
   // The window is told about the whole sequence, not only the end of it: that is
   // what lets it show "checking" instead of nothing.
   assert.deepEqual(phases, ['checking', 'available']);
 });
 
+test('a release without a page still has one on GitHub', async () => {
+  const updates = service({ fetchImpl: answering(release('v0.3.0', { html_url: undefined })) });
+  const state = await updates.check();
+  assert.equal(state.url, `https://github.com/${REPO}/releases/tag/v0.3.0`);
+});
+
+test('every state names the page, so the window can always offer it', () => {
+  const updates = service({});
+  const idle = updates.snapshot();
+  assert.equal(idle.releasesUrl, `https://github.com/${REPO}/releases`);
+});
+
 test('the running version is not offered as an update', async () => {
-  const updates = service({ fetchImpl: answering(release('v0.2.0', [asset('LexiQode-0.2.0-win32-x64.zip')])) });
+  const updates = service({ fetchImpl: answering(release('v0.2.0')) });
   const state = await updates.check();
   assert.equal(state.phase, 'current');
   assert.equal(state.version, '0.2.0');
@@ -177,6 +153,7 @@ test('a check without a repository says so instead of asking nobody', async () =
   const state = await updates.check();
   assert.equal(state.phase, 'unavailable');
   assert.match(state.message, /no repository/);
+  assert.equal(state.releasesUrl, '');
 });
 
 test('a release tag with no version in it is reported, not guessed at', async () => {
@@ -188,7 +165,7 @@ test('a release tag with no version in it is reported, not guessed at', async ()
 
 test('pre-releases are taken from the list only when asked for', async () => {
   const asked = [];
-  const list = [release('v0.4.0-beta.1', [asset('LexiQode-0.4.0-beta.1-win32-x64.zip')], { prerelease: true })];
+  const list = [release('v0.4.0-beta.1', { prerelease: true })];
   const updates = service({
     settings: { includePrereleases: true },
     fetchImpl: async (url) => {
@@ -208,12 +185,7 @@ test('a repeated check is answered from the last one until it is asked to look a
   const updates = service({
     fetchImpl: async () => {
       calls += 1;
-      return {
-        ok: true,
-        status: 200,
-        headers: { get: () => null },
-        json: async () => release('v0.3.0', [asset('LexiQode-0.3.0-win32-x64.zip')])
-      };
+      return { ok: true, status: 200, headers: { get: () => null }, json: async () => release('v0.3.0') };
     }
   });
   await updates.check();
@@ -223,123 +195,27 @@ test('a repeated check is answered from the last one until it is asked to look a
   assert.equal(calls, 2);
 });
 
-test('the archive is written to disk, with progress that reaches the end', async () => {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lexiqode-download-test-'));
-  const payload = Buffer.from('a'.repeat(4096));
-  const phases = [];
-  const updates = service({
-    dataDir,
-    onState: (state) => phases.push(state),
-    fetchImpl: async (url) => {
-      if (String(url).startsWith('https://api.github.com')) {
-        return {
-          ok: true,
-          status: 200,
-          headers: { get: () => null },
-          json: async () => release('v0.3.0', [asset('LexiQode-0.3.0-win32-x64.zip', payload.length)])
-        };
-      }
-      return {
-        ok: true,
-        status: 200,
-        headers: { get: (name) => (name === 'content-length' ? String(payload.length) : null) },
-        body: new Response(payload).body
-      };
-    }
-  });
-  await updates.check();
-  const state = await updates.download();
-  assert.equal(state.phase, 'downloaded');
-  assert.equal(state.percent, 100);
-  assert.equal(state.bytes, payload.length);
-  assert.equal(fs.readFileSync(state.file).length, payload.length);
-  // Nothing partial is left behind, and the progress that was pushed only ever
-  // moves forward.
-  assert.equal(fs.existsSync(`${state.file}.part`), false);
-  const percents = phases.filter((entry) => entry.phase === 'downloading').map((entry) => entry.percent);
-  assert.deepEqual(percents, [...percents].sort((a, b) => a - b));
-});
+/**
+ * The line this whole file holds: the update check cannot change the machine.
+ *
+ * An earlier version could - it downloaded an archive and started a script that
+ * replaced the application folder - and a window started from source refused
+ * with a message that left the user with nothing to do. The check is read-only
+ * now, and the way to fetch a release is a browser. This test reads the file
+ * because that is the only way to assert the absence of a capability.
+ */
+test('the service cannot download, install or start anything', () => {
+  const source = fs.readFileSync(path.join(APP, 'src', 'main', 'update-service.js'), 'utf8');
+  assert.doesNotMatch(source, /require\('node:child_process'\)/, 'it must not be able to start a process');
+  assert.doesNotMatch(source, /require\('node:fs/, 'it must not be able to read or write a file');
+  assert.doesNotMatch(source, /\bspawn\b|\bexecFile\b|\bcreateWriteStream\b/, 'no way to run or fetch anything onto disk');
 
-test('a refused download leaves no part file behind', async () => {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lexiqode-download-test-'));
-  const updates = service({
-    dataDir,
-    fetchImpl: async (url) => {
-      if (String(url).startsWith('https://api.github.com')) {
-        return {
-          ok: true,
-          status: 200,
-          headers: { get: () => null },
-          json: async () => release('v0.3.0', [asset('LexiQode-0.3.0-win32-x64.zip')])
-        };
-      }
-      return { ok: false, status: 403, headers: { get: () => null } };
-    }
-  });
-  await updates.check();
-  await assert.rejects(() => updates.download(), /refused/);
-  assert.deepEqual(fs.readdirSync(dataDir).filter((name) => name.endsWith('.part')), []);
-});
-
-test('a build started from source refuses to replace itself', async () => {
-  const updates = service({ packaged: false });
-  await assert.rejects(() => updates.install(), /started from source/);
-});
-
-test('an install without a downloaded archive is refused before anything runs', async () => {
-  const updates = service({ packaged: true, spawnImpl: () => assert.fail('nothing should be started') });
-  await assert.rejects(() => updates.install(), /no downloaded update/);
-});
-
-test('installing hands the swap to a detached script and names everything it needs', async () => {
-  const installDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lexiqode-install-test-'));
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lexiqode-install-data-'));
-  const archive = path.join(dataDir, 'LexiQode-0.3.0-win32-x64.zip');
-  fs.writeFileSync(archive, 'zip');
-  const calls = [];
-  const updates = service({
-    packaged: true,
-    installDir,
-    dataDir,
-    spawnImpl: (command, args, options) => {
-      calls.push({ command, args, options });
-      return { unref: () => {} };
-    }
-  });
-  updates.state.phase = 'downloaded';
-  updates.state.file = archive;
-  updates.state.version = '0.3.0';
-  const state = await updates.install();
-  assert.equal(state.phase, 'installing');
-  assert.equal(calls.length, 1);
-  const [call] = calls;
-  assert.equal(call.command, 'powershell.exe');
-  assert.ok(call.options.detached, 'the script must outlive the application');
-  const value = (flag) => call.args[call.args.indexOf(flag) + 1];
-  assert.equal(value('-ProcessId'), String(process.pid));
-  assert.equal(value('-Archive'), archive);
-  assert.equal(value('-Target'), installDir);
-  assert.equal(value('-Log'), path.join(dataDir, 'update.log'));
-  assert.equal(value('-Exe'), path.join(installDir, path.basename(process.execPath)));
-  // The script is run from a copy in the data folder: the shipped one lives
-  // inside the folder that is about to be renamed aside.
-  const script = value('-File');
-  assert.equal(path.dirname(script), dataDir);
-  assert.match(fs.readFileSync(script, 'utf8'), /waiting for the application/);
-});
-
-test('the swap script waits, unpacks first, and can put the old version back', () => {
-  const script = readUpdaterScript();
-  const wait = script.indexOf('while (Get-Process -Id $ProcessId');
-  const unpack = script.indexOf('Expand-Archive');
-  const aside = script.indexOf('Move-Item -LiteralPath $Target -Destination $old');
-  const intoPlace = script.indexOf('Move-Item -LiteralPath $source -Destination $Target');
-  const restore = script.indexOf('restoring the previous version');
-  const restart = script.indexOf('Start-Process -FilePath $Exe');
-  assert.ok(wait > 0, 'the script must wait for the application to exit');
-  assert.ok(wait < unpack, 'nothing is touched while the application is running');
-  assert.ok(unpack < aside, 'the archive is unpacked completely before the folder moves');
-  assert.ok(aside < intoPlace, 'the current folder is moved aside, not deleted first');
-  assert.ok(restore > intoPlace, 'the previous version is restored when the swap fails');
-  assert.ok(restart > 0, 'the application is started again');
+  const updates = service({});
+  assert.equal(updates.download, undefined, 'there is no download to call');
+  assert.equal(updates.install, undefined, 'there is no install to call');
+  assert.equal(
+    fs.existsSync(path.join(APP, 'src', 'main', 'apply-update.ps1')),
+    false,
+    'the script that replaced the application folder is gone with it'
+  );
 });

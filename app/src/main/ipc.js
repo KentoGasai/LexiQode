@@ -41,8 +41,7 @@ function registerIpc({
   agent,
   updates,
   watcher,
-  windowOf,
-  quitForUpdate = () => {}
+  windowOf
 }) {
   const handle = (channel, handler) => ipcMain.handle(channel, wrap(handler));
 
@@ -174,24 +173,15 @@ function registerIpc({
 
   // --------------------------------------------------------------- updates
   handle(CHANNELS.update.state, () => updates.snapshot());
-  handle(CHANNELS.update.check, (event, options) => updates.check(options || {}));
   /**
-   * The download and the install both answer before they are finished, which is
-   * the point of them: the window shows progress from the pushed state and does
-   * not hold a request open for the length of a 150 MB download.
+   * The check answers with what it found and nothing more.
+   *
+   * There is no download and no install to expose: the window opens the release
+   * page, and the archive is fetched by whoever wants it. This handler is
+   * therefore the whole of the update API, which is also why the service behind
+   * it never touches the machine.
    */
-  handle(CHANNELS.update.download, () => {
-    void updates.download().catch(() => {});
-    return { started: true };
-  });
-  handle(CHANNELS.update.install, async () => {
-    const state = await updates.install();
-    // The swap waits for this process to disappear, so leaving is the next step
-    // rather than an optional one. The delay lets this answer reach the window,
-    // so a failure to start the script is visible instead of a silent exit.
-    setTimeout(() => quitForUpdate(), 400);
-    return state;
-  });
+  handle(CHANNELS.update.check, (event, options) => updates.check(options || {}));
 
   // ----------------------------------------------------------------- agent
   handle(CHANNELS.agent.status, () => agent.describe());

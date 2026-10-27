@@ -242,6 +242,16 @@ export function createAppSettings({ api, settings, onNotice }) {
     return node;
   }
 
+  /**
+   * The updates block: what this version is, what was found, and where to get it.
+   *
+   * There is no Download button and no install button, and that is the decision
+   * this whole surface is built on: the application does not replace its own
+   * files. An earlier version tried, and what a person saw was a refusal they
+   * could not act on. The page is the answer - it holds the archive, its digest
+   * and the notes, and a browser is a far better installer than a detached
+   * PowerShell script.
+   */
   function updateBlock() {
     const update = state.update || {};
     const wrapper = el('div', { class: 'settings__update' });
@@ -250,10 +260,16 @@ export function createAppSettings({ api, settings, onNotice }) {
       el('span', { class: 'settings__note', text: t('settings.updateCurrent', { version: current }) })
     );
     const phase = update.phase || 'idle';
-    if (update.version && (phase === 'available' || phase === 'downloaded' || phase === 'downloading')) {
+    if (update.version && phase === 'available') {
       wrapper.append(el('span', { class: 'settings__note', text: t('settings.updateLatest', { version: update.version }) }));
     }
     if (update.message) wrapper.append(el('span', { class: 'settings__hint', text: update.message }));
+    if (update.notes && phase === 'available') {
+      wrapper.append(
+        el('span', { class: 'settings__note', text: t('update.notes') }),
+        el('pre', { class: 'update__notes', text: update.notes.slice(0, 1200) })
+      );
+    }
 
     const buttons = el('div', { class: 'settings__buttons' });
     if (phase === 'checking') {
@@ -268,41 +284,18 @@ export function createAppSettings({ api, settings, onNotice }) {
         })
       );
     }
-    if (phase === 'downloading') {
-      const bar = el('div', { class: 'settings__progress' }, [el('span', { style: { width: `${update.percent || 0}%` } })]);
-      wrapper.append(bar, el('span', { class: 'settings__hint', text: t('settings.updateProgress', { percent: update.percent || 0 }) }));
-    }
-    if (phase === 'available' && update.asset) {
-      buttons.append(
-        el('button', {
-          class: 'btn btn--primary',
-          type: 'button',
-          text: t('settings.updateDownload'),
-          onclick: () => void downloadUpdate()
-        })
-      );
-    }
-    if (phase === 'downloaded') {
-      buttons.append(
-        el('button', {
-          class: 'btn btn--primary',
-          type: 'button',
-          text: t('settings.updateRestart'),
-          onclick: () => void installUpdate()
-        })
-      );
-    }
-    if (update.url) {
-      buttons.append(
-        el('button', {
-          class: 'btn btn--ghost',
-          type: 'button',
-          text: t('settings.updateReleasePage'),
-          onclick: () => void api.shell.openExternal(update.url).catch(() => {})
-        })
-      );
-    }
+    buttons.append(
+      el('button', {
+        // Primary when there is something to fetch, quiet otherwise: the page is
+        // always worth having, but on a current version it is not the point.
+        class: phase === 'available' ? 'btn btn--primary' : 'btn btn--ghost',
+        type: 'button',
+        text: t('settings.updateReleasePage'),
+        onclick: () => openReleasePage()
+      })
+    );
     wrapper.append(buttons);
+    wrapper.append(el('span', { class: 'settings__hint', text: t('update.pageHint') }));
     return wrapper;
   }
 
@@ -403,20 +396,20 @@ export function createAppSettings({ api, settings, onNotice }) {
     }
   }
 
-  async function downloadUpdate() {
-    try {
-      await api.update.download();
-    } catch (error) {
-      onNotice?.(error.message, 'error');
+  /**
+   * Open the release page in the browser.
+   *
+   * The page is used whether or not a release was found: the address exists
+   * either way, and "there is nothing there yet" is a thing a user may want to
+   * see for themselves rather than be told.
+   */
+  function openReleasePage() {
+    const url = state.update ? state.update.url || state.update.releasesUrl : '';
+    if (!url) {
+      onNotice?.(t('update.noPage'), 'error');
+      return;
     }
-  }
-
-  async function installUpdate() {
-    try {
-      await api.update.install();
-    } catch (error) {
-      onNotice?.(error.message, 'error');
-    }
+    void api.shell.openExternal(url).catch((error) => onNotice?.(error.message, 'error'));
   }
 
   function applyUpdate(next) {
@@ -436,7 +429,7 @@ export function createAppSettings({ api, settings, onNotice }) {
    */
   function renderPrompt() {
     const update = state.update || {};
-    if (update.phase !== 'available' && update.phase !== 'downloading' && update.phase !== 'downloaded') {
+    if (update.phase !== 'available') {
       if (state.prompt) {
         state.prompt = false;
         updateOverlay.hidden = true;
@@ -455,41 +448,21 @@ export function createAppSettings({ api, settings, onNotice }) {
       })
     );
     if (update.notes) {
-      updateBody.append(el('pre', { class: 'update__notes', text: update.notes.slice(0, 1500) }));
+      updateBody.append(
+        el('p', { class: 'settings__note', text: t('update.notes') }),
+        el('pre', { class: 'update__notes', text: update.notes.slice(0, 1500) })
+      );
     }
     if (update.message) updateBody.append(el('p', { class: 'settings__hint', text: update.message }));
-    if (update.phase === 'downloading') {
-      updateBody.append(
-        el('div', { class: 'settings__progress' }, [el('span', { style: { width: `${update.percent || 0}%` } })])
-      );
-      updateBody.append(
-        el('p', { class: 'settings__hint', text: t('update.downloading', { percent: update.percent || 0 }) })
-      );
-    }
-    if (update.phase === 'downloaded') {
-      updateBody.append(el('p', { class: 'settings__note', text: t('update.downloaded') }));
-    }
     const buttons = el('div', { class: 'settings__buttons' });
-    if (update.phase === 'available' && update.asset) {
-      buttons.append(
-        el('button', {
-          class: 'btn btn--primary',
-          type: 'button',
-          text: t('update.download'),
-          onclick: () => void downloadUpdate()
-        })
-      );
-    }
-    if (update.phase === 'downloaded') {
-      buttons.append(
-        el('button', {
-          class: 'btn btn--primary',
-          type: 'button',
-          text: t('update.install'),
-          onclick: () => void installUpdate()
-        })
-      );
-    }
+    buttons.append(
+      el('button', {
+        class: 'btn btn--primary',
+        type: 'button',
+        text: t('update.releasePage'),
+        onclick: () => openReleasePage()
+      })
+    );
     buttons.append(
       el('button', {
         class: 'btn btn--ghost',
@@ -501,16 +474,7 @@ export function createAppSettings({ api, settings, onNotice }) {
         }
       })
     );
-    if (update.url) {
-      buttons.append(
-        el('button', {
-          class: 'btn btn--ghost',
-          type: 'button',
-          text: t('update.releasePage'),
-          onclick: () => void api.shell.openExternal(update.url).catch(() => {})
-        })
-      );
-    }
+    updateBody.append(el('p', { class: 'settings__hint', text: t('update.pageHint') }));
     updateBody.append(buttons);
   }
 

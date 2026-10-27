@@ -54,7 +54,7 @@ on one line, and how much of the model's window is in use under the composer.*
 | Modes | Agent, Ask, Plan, Debug, Review - what the next message is allowed to do |
 | Interface | resizable and restorable layout, dark and light themes (a button in the bottom-left corner, the command palette, the settings), Russian and English |
 | Settings | a window on `Ctrl+,`: appearance, editor, layout, files, terminal, assistant defaults, updates, and the version |
-| Updates | a newer release is looked for on GitHub at start and on demand, downloaded and installed over the current version |
+| Updates | a newer release is looked for on GitHub at start and on demand, and opened by its own page, where the archive is |
 
 ## Requirements
 
@@ -191,22 +191,22 @@ The theme button sits in the bottom-left corner of the status bar. It cycles dar
 light and "follow the system", and its tooltip says what the next click will do.
 
 Releases are read from GitHub: at start, if that is switched on, and on demand
-from Help ▸ Check for Updates…. A newer release is offered with its notes and a
-Download button; once the archive is downloaded, "Close and install" replaces the
-application. That last step is arranged so that it cannot fight the running app:
+from Help ▸ Check for Updates…. A newer release is named with its notes and a
+"Release page" button, which opens in the browser, and the archive and its digest
+are on that page.
 
-1. the archive is downloaded into `%APPDATA%\LexiQode\updates` and unpacked whole;
-2. the application closes;
-3. a separate script, `apply-update.ps1`, waits for the process to disappear,
-   moves the current folder aside, unpacks the new version into the same place,
-   starts it and removes the old folder;
-4. if any step fails, the previous version is moved back and started again - the
-   application is never left half-replaced. Every step is appended to
-   `%APPDATA%\LexiQode\updates\update.log`.
+The application does not replace itself, and that is a decision rather than a gap.
+The first version tried: it downloaded the archive, unpacked it whole, and handed a
+separate script the job of swapping the application folder once the process had
+gone. What it produced was confusion. A build started from source refused with a
+message nobody could act on - the install simply did not happen - and replacing a
+portable build in place is a great deal of machinery for something a person does by
+unpacking a zip.
 
-Settings and per-machine data are never touched: they live outside the application
-folder. A build started from source refuses to replace itself and points at the
-release page instead.
+Updating is therefore: close the application, unpack the archive over the current
+folder, start it. Settings and per-machine data are never touched, because they
+live outside the application folder, and the same holds for a build started from
+source.
 
 ## Interface language
 
@@ -234,13 +234,10 @@ and refuses to let them drift apart.
   (to reach the endpoint you configured) and the update check use the network -
   the latter asks GitHub for releases from the main process, and can be switched
   off in the settings.
-* **An update replaces the application folder.** The portable build updates in
-  place: the archive is unpacked over the current folder by a separate script that
-  runs once the application has closed. Files you put in the application folder
-  yourself do not survive that; your settings and data live outside it.
-* **A build from source does not update itself.** It is pointed at the release
-  page instead, because overwriting the repository it was started from would be a
-  strange thing for it to do.
+* **The application does not update itself.** The check reports a new release and
+  opens its page; the archive is unpacked by hand with the application closed.
+  Files you put in the application folder yourself do not survive that; your
+  settings and data live outside it.
 * Messages that originate in the core are printed as the core phrased them.
 * Only Windows is supported.
 
@@ -288,7 +285,7 @@ open and never touch your own files:
 | `probe-chat-window.cjs` | the assistant through the window: settings, model choice, an answer, reasoning, tools, chat tabs |
 | `probe-explorer-live.cjs` | the tree follows the disk; right-click on a file and on empty space |
 | `probe-editor-colors.cjs` | seven kinds of file open with their own language and with colours: it checks the language id and counts the token colours |
-| `probe-app-features.cjs` | the shell opens with the folder, the model sits beside the mode without ever covering it (even with a long id), a file leaving the message and coming back, the theme and settings buttons, the settings window and its write path, and what the update check reports; it also leaves a picture of the composer in the temp folder |
+| `probe-app-features.cjs` | the shell that opens with the folder, the model next to the mode and not overlapping it even with a long id, a file removed from the message and put back, the theme and settings buttons, the settings dialog and its write path, what the update check reports, and that the settings offer no download or install button; the composer line is captured into a temporary folder |
 | `probe-update-offer.cjs` | whether a download is offered when GitHub has a newer release (needs the network; downloads nothing) |
 | `probe-chat.cjs` | the core end to end, through a stub OpenAI-compatible server |
 | `capture-screenshots.cjs` | takes the screenshots for this README (above) |

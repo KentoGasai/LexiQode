@@ -84,14 +84,13 @@ const CHANNELS = {
    * Updates, from the releases published on GitHub.
    *
    * The window asks; the main process does the talking, because the window is
-   * not allowed to reach the network at all and because the download has to
-   * outlive the window's own request.
+   * not allowed to reach the network at all. There is deliberately no download
+   * and no install channel: the answer is a release page, and the archive is
+   * fetched from it by the person who wants it.
    */
   update: {
     state: 'update:state',
     check: 'update:check',
-    download: 'update:download',
-    install: 'update:install',
     progress: 'update:progress'
   },
   agent: {
