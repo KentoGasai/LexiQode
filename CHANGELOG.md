@@ -1,168 +1,171 @@
-# Changelog
+# Журнал изменений
 
-Versions follow [semantic versioning](https://semver.org/): the major number
-marks a change no older configuration survives, the minor number a release that
-adds features, and the patch number a release that only fixes them. Nothing in
-this file is retrospective filler - each entry is a change that was made,
-measured on a running window, and re-checked by a test or a probe.
+Версии следуют [семантическому версионированию](https://semver.org/): старший
+номер означает изменение, которое не переживёт прежняя конфигурация, минорный —
+выпуск с новыми возможностями, патч — выпуск только с исправлениями. В этом файле
+нет ничего «для полноты»: каждая запись — это сделанное изменение, измеренное на
+работающем окне и перепроверенное тестом или замером.
 
-## Unreleased - planned 0.3.0
+## Не выпущено — планируется 0.3.0
 
-Everything below is in the repository and verified by the suite and the probes,
-and none of it is in the 0.2.0 tag: the tag is published, so these changes belong
-to the next release rather than to a rewritten past.
+Всё перечисленное уже в репозитории и проверено набором тестов и замерами, и
+ничего из этого нет в теге 0.2.0: тег опубликован, поэтому эти изменения
+относятся к следующему выпуску, а не к переписанному прошлому.
 
-### Files are coloured again
+### Файлы снова подсвечиваются
 
-* A file was given its own extension as its language, so `.js`, `.ts`, `.py`,
-  `.md`, `.ps1` and `.yml` were never a language Monaco knew: they opened as
-  plain text, with no colours and no language service, and nothing threw to say
-  so. Only `.json`, `.css` and `.html` looked right, and only because for those
-  three the extension and the language id happen to be the same word.
-* The language is now asked of Monaco's own registry - name first, so a
-  `Dockerfile` or a `Makefile` is recognised, then extension - and the id the
-  entry carries is what the model is created with.
-* Measured on a running window: seven files of seven kinds, each with the right
-  language id and between 3 and 8 distinct token colours. Before the change, all
-  seven were `plaintext` with one.
+* Файлу в качестве языка выдавалось его собственное расширение, поэтому `.js`,
+  `.ts`, `.py`, `.md`, `.ps1` и `.yml` не были языком, который Monaco знает: они
+  открывались как простой текст — без подсветки и без языковой службы, и ничто не
+  бросало исключения, чтобы об этом сказать. Правильно выглядели только `.json`,
+  `.css` и `.html`, и лишь потому, что у этих трёх расширение и идентификатор
+  языка совпадают.
+* Теперь язык спрашивают у собственного реестра Monaco — сначала по имени файла,
+  так что `Dockerfile` и `Makefile` узнаются, затем по расширению, — и модель
+  создаётся с тем идентификатором, который несёт запись реестра.
+* Измерено на работающем окне: семь файлов семи видов, у каждого верный
+  идентификатор языка и от 3 до 8 различных цветов токенов. До правки все семь
+  были `plaintext` с одним цветом.
 
-### The message's context is the user's to edit
+### Контекст сообщения правит пользователь
 
-* A file that appeared in the context by itself could not be taken out. Every file
-  the next message will carry is now a chip with a cross, an "add a file" button
-  offers the file in the editor, and the tree's own menu adds and removes files by
-  right-click, where files are actually found.
-* Removing means removing: taking out the file that is open in the editor sets
-  it aside for the message instead of unpinning it and letting the preference
-  draw it again.
-* The pinned files are named in the preamble the agent receives, deduplicated and
-  bounded, and they are named rather than read: the agent has tools for reading.
+* Файл, который попал в контекст сам, нельзя было убрать. Теперь каждый файл,
+  который уйдёт со следующим сообщением, — это чип с крестиком, кнопка «добавить
+  файл» предлагает открытый файл, а меню дерева по правому щелчку добавляет и
+  убирает файлы там, где их действительно ищут.
+* «Убрать» означает убрать: открытый файл откладывается для этого сообщения, а не
+  просто открепляется, чтобы настройка не нарисовала его снова.
+* Прикреплённые файлы называются в преамбуле, которую получает агент, — без
+  дублей и с ограничением, и именно называются, а не читаются: у агента есть
+  инструменты для чтения.
 
-### The model, beside the mode
+### Модель — рядом с режимом
 
-* The model in force is a chooser next to the mode button, where the two
-  decisions that shape a message belong together. The list is the endpoint's own,
-  asked once per profile, and choosing writes the model into the profile the core
-  already has - so the endpoint, the key and the limits survive.
+* Модель, которая действует, выбирается в списке рядом с кнопкой режима: два
+  решения, определяющие сообщение, должны стоять вместе. Список — собственный
+  список эндпоинта, запрашивается один раз на профиль, а выбор записывает модель
+  в тот профиль, который уже есть у ядра, поэтому адрес, ключ и лимиты
+  сохраняются.
 
-### A button for the theme, and settings of the window's own
+### Кнопка темы и собственные настройки окна
 
-* The theme has a button in the bottom-left corner of the status bar. It cycles
-  dark, light and "follow the system", names the current theme and says what the
-  next click will do; the palette command runs the same cycle.
-* The window has a settings dialog at `Ctrl+,` (File ▸ Settings…, or the
-  palette): appearance, editor, layout, files, terminal, assistant defaults,
-  updates, and the version. Every control writes through the settings API, and
-  the dialog redraws from the file rather than believing itself.
-* `includeActiveFile` and `includeSelection` finally have a surface: they
-  decided what every message carried and could only be changed in JSON.
+* У темы появилась кнопка в левом нижнем углу строки состояния. Она перебирает
+  тёмную, светлую и «как в системе», называет текущую тему и говорит, что сделает
+  следующий щелчок; команда в палитре выполняет тот же цикл.
+* У окна появились настройки по `Ctrl+,` (меню «Файл ▸ Настройки…» или палитра):
+  оформление, редактор, раскладка, файлы, терминал, поведение ассистента,
+  обновления и версия. Каждый элемент управления пишет через API настроек, а
+  форма перерисовывается от файла, а не верит самой себе.
+* `includeActiveFile` и `includeSelection` наконец получили поверхность: они
+  решали, что уходит с каждым сообщением, а менять их можно было только в JSON.
 
-### A folder opens with a shell in it
+### Папка открывается вместе с оболочкой
 
-* Opening a folder shows a PowerShell session already in that folder in the
-  bottom panel. A session belongs to the directory it was started in, so the one
-  from the previous folder is closed rather than left pointing elsewhere.
-  `terminal.openWithFolder` turns it off.
+* При открытии папки в нижней панели появляется сессия PowerShell уже в этой
+  папке. Сессия принадлежит каталогу, в котором была запущена, поэтому сессия из
+  прежней папки закрывается, а не остаётся смотреть куда-то ещё.
+  Настройка `terminal.openWithFolder` это отключает.
 
-### A new release is looked for, and installed after the app has gone
+### Новый выпуск ищется, а устанавливается после закрытия приложения
 
-* On start, and on demand from Help ▸ Check for Updates…, the newest release is
-  read from GitHub. A newer one is offered in a window with its notes, a Download
-  button and a link to the release page.
-* The install is the part worth describing, because a running application cannot
-  replace its own files on Windows. The archive is downloaded to
-  `%APPDATA%\LexiQode\updates`, unpacked completely, and handed to
-  `apply-update.ps1`, which is started detached and waits for the application's
-  process to disappear. Only then is the application folder renamed aside, the
-  new tree moved into its place, the new version started, and the old folder
-  removed. If any step fails the previous version is renamed back and started
-  again, and every step is appended to a log next to the archive.
-* Settings and per-machine data live outside the application folder, so replacing
-  it does not touch a single preference.
-* A build started from source refuses to replace itself and says so.
+* При запуске и по команде «Справка ▸ Проверить обновления…» читается самый
+  свежий выпуск на GitHub. Если он новее, окно предлагает его: заметки выпуска,
+  кнопка «Скачать» и ссылка на страницу выпуска.
+* Установку стоит описать, потому что работающее приложение в Windows не может
+  заменить собственные файлы. Архив скачивается в `%APPDATA%\LexiQode\updates`,
+  распаковывается целиком и передаётся `apply-update.ps1`, который запускается
+  отдельно и ждёт исчезновения процесса приложения. Только после этого папка
+  приложения отставляется в сторону, на её место ставится новое дерево, новая
+  версия запускается, а старая папка удаляется. Если какой-то шаг не удался,
+  прежняя версия возвращается на место и запускается, а каждый шаг дописывается в
+  журнал рядом с архивом.
+* Настройки и данные для конкретной машины лежат вне папки приложения, поэтому её
+  замена не трогает ни одной настройки.
+* Сборка, запущенная из исходников, заменять себя отказывается и говорит об этом.
 
-### Verified
+### Проверено
 
-* 179 window tests and 162 core tests. Two new probes drive the real window: one
-  opens files of seven kinds and counts the token colours, the other exercises
-  the shell that opens with a folder, the model chooser, taking a file out of a
-  message and putting it back, the theme button, the settings dialog and its
-  write path, and what the update check reports.
-* The update check was exercised against GitHub's release API itself, not only
-  against a stub: pointed at a public repository it read the newest release,
-  compared it with the running version, and picked an archive.
+* 179 тестов окна и 162 теста ядра. Два новых замера работают с настоящим окном:
+  один открывает файлы семи видов и считает цвета токенов, другой проверяет
+  оболочку, открывающуюся вместе с папкой, выбор модели, убирание файла из
+  сообщения и возвращение его назад, кнопку темы, окно настроек и запись в него, а
+  также что сообщает проверка обновлений.
+* Проверка обновлений была прогнана и против самого API релизов GitHub, а не
+  только против заглушки: направленная на публичный репозиторий, она прочитала
+  самый свежий выпуск, сравнила его с работающей версией и выбрала архив.
 
-## 0.2.0 - 2026-10-26
+## 0.2.0 — 2026-10-26
 
-The first release with a working assistant, and the reason this project exists at
-all. 0.1.0 was an editor; this is an editor with an agent inside it.
+Первый выпуск с работающим ассистентом и причина, по которой этот проект вообще
+существует. 0.1.0 был редактором; это редактор с агентом внутри.
 
-### The assistant actually answers
+### Ассистент действительно отвечает
 
-* A turn no longer hangs before it reaches the model. The workspace snapshot ran
-  `git status` with the core's stdin inherited, and the editor starts the core
-  with a pipe nobody writes to: git waited on that pipe, so every turn blocked
-  before the first token. Every command-line test passed, because a console's
-  stdin is a terminal.
-* The panel subscribes to the events the core emits. They were produced and
-  never drawn, which is what an assistant that answers nothing looks like.
-* Reasoning is one disclosure above the answer: open while the model thinks,
-  folded to "Thought for Ns" when the answer starts, a click away at any time.
-* Tool calls are one collapsed line per turn instead of a full-width row each,
-  with the arguments the model actually sent - they used to render as
-  `read_file [object Object]`.
+* Ход больше не зависает до обращения к модели. Снимок рабочей папки запускал
+  `git status` с унаследованным stdin ядра, а редактор запускает ядро с каналом, в
+  который никто не пишет: git ждал этот канал, поэтому каждый ход вставал до
+  первого токена. Все тесты командной строки проходили, потому что у консоли stdin
+  — это терминал.
+* Панель подписывается на события, которые ядро порождает. Они порождались и
+  никогда не рисовались — именно так и выглядит ассистент, который ничего не
+  отвечает.
+* Рассуждения — одна раскрывающаяся строка над ответом: открыта, пока модель
+  думает, сворачивается в «Думаю… N с», когда начинается ответ, и открывается
+  одним щелчком в любой момент.
+* Вызовы инструментов — одна свёрнутая строка на ход вместо строки во всю ширину
+  на каждый вызов, с теми аргументами, которые модель действительно прислала:
+  раньше они рисовались как `read_file [object Object]`.
 
-### The context is managed instead of overflowing
+### Контекстом управляют, а не переполняют его
 
-* `context_window` is finally used. Past 75% of the window (minus the room an
-  answer needs) the core asks the model to summarise the oldest part of the
-  conversation, replaces it with that summary, and keeps the summary through
-  later compactions. Before this, the only limit was a count of 60 messages
-  applied after a turn had already run.
-* The composer shows how full the window is, and says whether the number was
-  reported by the server or estimated by the core.
-* The context window, the answer budget and the compaction threshold are
-  editable in the settings form; they were stored by the core and reachable
-  nowhere.
+* `context_window` наконец используется. После 75% окна (за вычетом места, которое
+  нужно ответу) ядро просит модель пересказать самую старую часть разговора,
+  заменяет её этим пересказом и сохраняет пересказ при последующих сжатиях. До
+  этого единственным ограничением было число в 60 сообщений, применявшееся уже
+  после того, как ход отработал.
+* Поле ввода показывает, насколько заполнено окно, и говорит, откуда взялось
+  число: его сообщил сервер или его оценило ядро.
+* Окно контекста, бюджет ответа и порог сжатия правятся в форме настроек: раньше
+  ядро их хранило, а добраться до них было неоткуда.
 
-### Chats are kept
+### Разговоры сохраняются
 
-* Every conversation is a document of its own, saved as it is written, listed by
-  title, and opened in a tab. "New conversation" opens a new chat instead of
-  resetting the current one into oblivion.
-* Tabs are restored on the next start; a chat can be reopened from the list,
-  renamed, or deleted, without touching the others.
+* Каждый разговор — отдельный документ, сохраняемый по мере написания,
+  перечисляемый по названию и открываемый во вкладке. «Новый разговор» открывает
+  новый чат вместо того, чтобы стирать текущий.
+* Вкладки восстанавливаются при следующем запуске; чат можно открыть заново из
+  списка, переименовать или удалить, не трогая остальные.
 
-### The window follows the folder
+### Окно следует за папкой
 
-* The file tree updates when the folder changes on disk - a build, a
-  `git checkout`, another editor, or the agent writing through the core. A file
-  created outside the application appears on its own.
-* A right-click opens a real menu: Open, Open to the side, Reveal in Explorer,
-  Copy path, Copy relative path, Rename, Delete - and for empty space, New file,
-  New folder, Reveal folder, Copy path, Refresh.
-* The theme is switchable from the settings (system, dark, light), not only from
-  the command palette.
-* The model the agent is actually configured with is named in the status bar, and
-  the folder that is open is named in the title bar with a button that opens
-  another one.
+* Дерево файлов обновляется, когда папка меняется на диске: сборка, `git
+  checkout`, другой редактор или агент, пишущий через ядро. Файл, созданный вне
+  приложения, появляется сам.
+* Правый щелчок открывает настоящее меню: открыть, открыть сбоку, показать в
+  проводнике, копировать путь, копировать относительный путь, переименовать,
+  удалить — а для пустого места: новый файл, новая папка, показать папку,
+  копировать путь, обновить.
+* Тема переключается из настроек (как в системе, тёмная, светлая), а не только из
+  палитры команд.
+* Модель, с которой агент действительно настроен, названа в строке состояния, а
+  открытая папка — в заголовке, где кнопка открывает другую.
 
-### Core and interface
+### Ядро и интерфейс
 
-* 162 core tests, 145 window tests, and four probes that drive a real application
-  window and report what it shows.
-* Settings written through the API are coerced to the type their field declares,
-  so a quoted `"128000"` cannot stop the agent with a `TypeError` in arithmetic
-  the user never sees.
-* The core and the application report one version. They used to disagree: the
-  artefact was named 0.1.0 and the core introduced itself as 1.0.0.
+* 162 теста ядра, 145 тестов окна и четыре замера, которые запускают настоящее
+  окно приложения и сообщают, что оно показывает.
+* Настройки, записанные через API, приводятся к типу, объявленному у поля, так что
+  взятое в кавычки `"128000"` не может остановить агента ошибкой `TypeError` в
+  арифметике, которой пользователь не видит.
+* Ядро и приложение сообщают одну версию. Раньше они расходились: артефакт
+  назывался 0.1.0, а ядро представлялось как 1.0.0.
 
-## 0.1.0 - 2026-10-25
+## 0.1.0 — 2026-10-25
 
-The first working build: a Windows editor with a file tree, a Monaco editor with
-tabs, find in files, a git panel, a real PowerShell terminal, and an assistant
-panel that could reach an OpenAI-compatible endpoint the user configured.
+Первая работающая сборка: редактор для Windows с деревом файлов, редактором Monaco
+с вкладками, поиском по файлам, панелью git, настоящим терминалом PowerShell и
+панелью ассистента, которая умела обращаться к настроенному пользователем
+OpenAI-совместимому адресу.
 
-Not a public release. Kept in the changelog because the repository has no tags
-before this one, and a first entry that pretends to be a first release would be
-wrong.
+Не публичный выпуск. Оставлено в журнале потому, что до этого тега в репозитории
+нет ни одного, а первая запись, притворяющаяся первым выпуском, была бы неправдой.

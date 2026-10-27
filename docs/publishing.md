@@ -1,77 +1,78 @@
-# Publishing this repository
+# Публикация этого репозитория
 
-What has to be true before the repository is public, what was actually checked,
-and what to do in the GitHub interface. Written so that the whole thing can be
-re-done later - on a bigger release, or after a new file has been added that
-nobody thought about.
+Что должно быть верно до того, как репозиторий станет публичным, что именно было
+проверено и что нужно сделать в интерфейсе GitHub. Написано так, чтобы всё это
+можно было повторить потом — на выпуске побольше или после того, как в проект
+добавили файл, о котором никто не подумал.
 
-## 1. Before it is public: the credential audit
+## 1. До публикации: аудит учётных данных
 
-A public repository publishes **every commit**, not the current file list. A key
-that was added in one commit and removed in the next is still readable in the
-history, and GitHub's search will find it. So the audit is over the history.
+Публичный репозиторий публикует **каждый коммит**, а не текущий список файлов.
+Ключ, добавленный одним коммитом и удалённый следующим, всё равно читается в
+истории, и поиск GitHub его найдёт. Поэтому аудит идёт по истории.
 
-### What was checked, and the result (2026-10-26)
+### Что проверялось и с каким результатом (2026-10-26)
 
-| Check | Method | Result |
+| Проверка | Способ | Результат |
 |---|---|---|
-| Secrets in every commit | scanned all added lines of all 83 commits on all branches for OpenAI keys, GitHub tokens, AWS ids, Slack tokens, private-key blocks, JWTs, assigned `api_key`/`secret`/`password` values, credentials inside URLs, Yandex markers, and the corporate host names seen in the machine's git configuration | **nothing real**; three matches, all false positives (see below) |
-| Files that should never be committed | every path ever committed, filtered for `.env`, `secret`, `credential`, `token`, `*.key`, `*.pem`, `settings.json`, `*.bak`, `runtime.json` | only `.vscode/settings.json` and `extension/.vscode/settings.json` (editor settings, local TypeScript path) |
-| Working tree | tracked files scanned with the same patterns; untracked files listed | clean, nothing untracked |
-| Binary or large objects | tracked files by extension; objects over 200 KB in history | none; the repository is 1.30 MiB |
-| Where the settings actually live | read `.gitignore` | settings, logs, databases and the runtime descriptor are ignored by name and by rule |
-| Release archive | entries listed and the text files inside searched | no settings file, no key, no log (see §4) |
-| Remotes | `git remote -v`, `git config --list` | plain HTTPS URLs, no token embedded |
+| Секреты в каждом коммите | просмотрены все добавленные строки всех 83 коммитов на всех ветках: ключи OpenAI, токены GitHub, идентификаторы AWS, токены Slack, блоки приватных ключей, JWT, присвоенные значения `api_key`/`secret`/`password`, учётные данные внутри URL, маркеры Яндекса и корпоративные имена хостов из git-конфигурации машины | **ничего настоящего**; три совпадения, все ложные (см. ниже) |
+| Файлы, которые не должны попадать в коммиты | все пути, когда-либо попадавшие в коммиты, отфильтрованные по `.env`, `secret`, `credential`, `token`, `*.key`, `*.pem`, `settings.json`, `*.bak`, `runtime.json` | только `.vscode/settings.json` и `extension/.vscode/settings.json` (настройки редактора, локальный путь к TypeScript) |
+| Рабочее дерево | отслеживаемые файлы проверены теми же шаблонами; неотслеживаемые перечислены | чисто, неотслеживаемого нет |
+| Двоичные и крупные объекты | отслеживаемые файлы по расширениям; объекты крупнее 200 КБ в истории | нет; репозиторий занимает 1,30 МиБ |
+| Где на самом деле лежат настройки | прочитан `.gitignore` | настройки, журналы, базы и описание запущенного процесса игнорируются и по именам, и по правилам |
+| Архив выпуска | перечислены записи и найдены текстовые файлы внутри | ни файла настроек, ни ключа, ни журнала (см. §4) |
+| Удалённые репозитории | `git remote -v`, `git config --list` | обычные адреса HTTPS, токен нигде не вписан |
 
-The three matches, so that the next person does not have to work it out again:
+Те самые три совпадения — чтобы следующему человеку не пришлось выяснять это
+заново:
 
-1. `app/src/renderer/css/app.css` - a comment explaining that a model id can look
-   like `gpt://folder/name/version`.
-2. `core/tests/test_config.py` - two test fixtures whose key is the literal
-   string `secret-value` / `topsecret123`.
-3. The same fixtures again in the current tree.
+1. `app/src/renderer/css/app.css` — комментарий, объясняющий, что идентификатор
+   модели может выглядеть как `gpt://folder/name/version`.
+2. `core/tests/test_config.py` — две тестовые заглушки, у которых ключ — буквальная
+   строка `secret-value` / `topsecret123`.
+3. Те же заглушки ещё раз в текущем дереве.
 
-### Re-running the audit
+### Как повторить аудит
 
-The script is not committed as a tool, because it is twenty lines and a script
-that is trusted is worse than a command that is read. To repeat it:
+Скрипт не положен в репозиторий как инструмент: в нём двадцать строк, а скрипт,
+которому доверяют, хуже команды, которую читают. Чтобы повторить:
 
 ```powershell
 cd F:\Gitea\LexiQode2
 
-# Every path ever committed, filtered for credential-shaped names
+# Все пути, когда-либо попадавшие в коммиты, по «учётным» именам
 git log --all --name-only --pretty=format: | Sort-Object -Unique |
   Select-String -Pattern '\.env|secret|credential|password|token|\.key$|\.pem$|settings\.json|\.bak'
 
-# Every added line in history, filtered for credential-shaped values
+# Все добавленные строки в истории, по «учётным» значениям
 git log --all -p --no-merges | Select-String -Pattern 'sk-[A-Za-z0-9]{20,}|ghp_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|BEGIN [A-Z ]*PRIVATE KEY|://[^/@\s]+:[^/@\s]+@'
 
-# Anything large that should not be in a public repository
+# Что-нибудь крупное, чему не место в публичном репозитории
 git count-objects -vH
 ```
 
-Three rules that keep it clean from here:
+Три правила, которые держат это чистым дальше:
 
-* Settings, keys and conversations belong in `%APPDATA%` / `%LOCALAPPDATA%` and
-  are already in `.gitignore`. Nothing about a model endpoint belongs in the
-  tree, not even in a test - the tests use literal placeholders.
-* An exception that was already published once must be treated as compromised:
-  rotate the key, do not delete the file.
-* Check before pushing, not before releasing. The release is the announcement;
-  the push is the publication.
+* Настройки, ключи и разговоры живут в `%APPDATA%` / `%LOCALAPPDATA%` и уже
+  перечислены в `.gitignore`. Ничего про адрес модели не должно быть в дереве,
+  даже в тесте: тесты используют буквальные заглушки.
+* С исключением, которое уже попало в публикацию, обращаются как со
+  скомпрометированным: ключ меняют, а не удаляют файл.
+* Проверяйте перед `push`, а не перед выпуском. Выпуск — это объявление, а
+  публикация — это `push`.
 
-### One honest note about the history
+### Одна честная заметка про историю
 
-The history contains about thirty `cline checkpoint` / `untracked files on cline
-checkpoint` commits - bookkeeping commits written by the development tool. They
-contain only this project's own files (the scan above covered them), but they make
-`git log` noisy for a reader who came from the release page.
+В истории около тридцати коммитов вида `cline checkpoint` / `untracked files on
+cline checkpoint` — служебных коммитов инструмента разработки. В них только файлы
+самого проекта (проверка выше их покрыла), но для читателя, пришедшего со страницы
+выпуска, они делают `git log` шумным.
 
-If a clean history is wanted, it is a squash, and it is done **before** the first
-public tag, never after:
+Если нужна чистая история, это squash, и делается он **до** первого публичного
+тега, никогда после:
 
 ```powershell
-# History-free start: one commit containing the released tree
+# Начать историю заново: один коммит с выпущенным деревом
 git checkout --orphan release
 git add -A
 git commit -m "LexiQode 0.2.0"
@@ -79,37 +80,38 @@ git branch -M release main
 git push --force origin main
 ```
 
-That throws away the record of how the project was built. The alternative - an
-interactive rebase dropping the checkpoint commits - keeps the narrative and
-rewrites every SHA after the first dropped commit, which also needs a force push.
-Neither is required: nothing above found a secret.
+Это выбрасывает запись о том, как проект строился. Альтернатива — интерактивный
+rebase, выбрасывающий служебные коммиты, — сохраняет изложение и переписывает
+каждый SHA после первого выброшенного коммита, что тоже требует `--force`. Ни то,
+ни другое не обязательно: ничего из найденного выше секретом не является.
 
-## 2. Making the repository public
+## 2. Как сделать репозиторий публичным
 
-GitHub interface: **Settings ▸ General ▸ Danger Zone ▸ Change repository
-visibility ▸ Change to public**. GitHub warns about forks, stars, watchers and
-Actions secrets; there are none here.
+В интерфейсе GitHub: **Settings ▸ General ▸ Danger Zone ▸ Change repository
+visibility ▸ Change to public**. GitHub предупреждает про форки, звёзды,
+наблюдателей и секреты Actions; здесь ничего этого нет.
 
-With the GitHub CLI (not installed on this machine - `winget install GitHub.cli`,
-then `gh auth login`):
+Через GitHub CLI (на этой машине он не установлен — `winget install GitHub.cli`,
+затем `gh auth login`):
 
 ```powershell
 gh repo edit KentoGasai/LexiQode --visibility public --accept-visibility-change-consequences
 ```
 
-GitHub reports that this repository has moved to `KentoGasai/LexiQode`. Either
-name works; if the shorter one is the future, change the remote and the clone
-lines in both READMEs together, or one of them will send a newcomer to a redirect.
+GitHub сообщает, что репозиторий переехал на `KentoGasai/LexiQode`. Работает оба
+имени; если будущее за коротким, поменяйте удалённый репозиторий и строки
+клонирования в обоих README **вместе**, иначе одно из них отправит новичка на
+перенаправление.
 
-## 3. Being found: what actually decides it
+## 3. Как вас находят: что на самом деле это решает
 
-Being *findable* and being *noticed* are different things, and only the first is
-something a repository can set up for itself.
+Быть *находимым* и быть *замеченным* — разные вещи, и только первое репозиторий
+может устроить себе сам.
 
-**Findable** is metadata, and it is worth ten minutes:
+**Находимость** — это метаданные, и на них стоит потратить десять минут:
 
-* **Topics** - the strongest signal in GitHub's own search and in the topic pages
-  people browse. Suggested set for this project:
+* **Темы (topics)** — самый сильный сигнал и в поиске GitHub, и на страницах тем,
+  которые люди просматривают. Предлагаемый набор для этого проекта:
 
   ```
   ai, ai-ide, code-editor, developer-tools, llm, local-llm, openai, openai-api,
@@ -118,47 +120,47 @@ something a repository can set up for itself.
   ```
 
   `gh repo edit KentoGasai/LexiQode --add-topic ai --add-topic ai-ide ...`
-* **Description** - one sentence, the words a person would search for:
-  *"A Windows AI IDE with a built-in agent that runs on your own OpenAI-compatible endpoint - local-first, no account, no telemetry."*
-* **Social preview** - the image GitHub shows when the link is pasted anywhere.
-  Upload `docs/social-preview.png` (1280×640, captured from the running
-  application) under **Settings ▸ General ▸ Social preview**.
-* **README first screen** - a search engine indexes the text, a person reads the
-  first paragraph and looks at the first image. Both were rewritten for that.
-* **A release, not just commits** - the release page is what a link from anywhere
-  else lands on, and it is the only thing that says "this is a thing you can
-  download".
+* **Описание** — одно предложение, теми словами, которые человек стал бы искать:
+  *«IDE для Windows со встроенным агентом, который работает на вашем
+  OpenAI-совместимом адресе модели: локально, без учётной записи и телеметрии.»*
+* **Social preview** — картинка, которую GitHub показывает, когда ссылку куда-то
+  вставляют. Загрузите `docs/social-preview.png` (1280×640, снят с работающего
+  приложения) в **Settings ▸ General ▸ Social preview**.
+* **Первый экран README** — поисковик индексирует текст, человек читает первый
+  абзац и смотрит на первую картинку. И то и другое переписано именно под это.
+* **Выпуск, а не просто коммиты** — ссылка откуда угодно попадает на страницу
+  выпуска, и только она говорит «это то, что можно скачать».
 
-**Noticed** is people, and no tag makes it happen. GitHub Trending is a burst of
-stars in a short window, so it is a consequence of being shared somewhere with an
-audience, not a mechanism that can be switched on. What does work, in the order
-that costs least:
+**Замеченность** — это люди, и никакой тег её не создаёт. GitHub Trending — это
+всплеск звёзд за короткое окно, то есть следствие того, что о проекте где-то
+рассказали аудитории, а не механизм, который можно включить. Что действительно
+работает, в порядке наименьших затрат:
 
-1. A place to talk: enable **Discussions**, so the first interested person has
-   somewhere to ask a question that is not an issue.
-2. Cheap credibility: `CONTRIBUTING.md`, issue templates, and a working
-   `LICENSE` - a stranger deciding whether to spend an evening on a project looks
-   for exactly these.
-3. Somewhere with an audience that cares about this specific thing. The honest
-   list for this project: `r/LocalLLaMA` and `r/ChatGPTCoding`, Hacker News (Show
-   HN, once, with a plain description), `awesome-selfhosted` and the `awesome-*`
-   lists for local LLM tooling, Habr or a Telegram channel for the Russian
-   audience, and dev.to for a written walkthrough. Each of these wants a *story*,
-   not a link: for this project the story is the git call that blocked every turn
-   because of an inherited stdin pipe, and the probe that found it.
-4. Post once per release, not once per commit. A repository that appears in the
-   same five places every week is a repository people mute.
+1. Место, где можно поговорить: включите **Discussions**, чтобы первому
+   заинтересовавшемуся было где задать вопрос, который не является issue.
+2. Дешёвая убедительность: `CONTRIBUTING.md`, шаблоны issue и работающий
+   `LICENSE` — посторонний человек, решающий, потратить ли на проект вечер,
+   смотрит ровно на это.
+3. Место, где есть аудитория, которой интересно именно это. Честный список для
+   этого проекта: `r/LocalLLaMA` и `r/ChatGPTCoding`, Hacker News (Show HN, один
+   раз, с простым описанием), `awesome-selfhosted` и списки `awesome-*` про
+   локальный LLM-инструментарий, Habr или телеграм-канал для русскоязычной
+   аудитории и dev.to для письменного разбора. Каждому из них нужна *история*, а
+   не ссылка: для этого проекта история — это вызов git, который блокировал каждый
+   ход из-за унаследованного канала stdin, и замер, который это нашёл.
+4. Публикуйте один раз на выпуск, а не на коммит. Репозиторий, появляющийся в
+   одних и тех же пяти местах каждую неделю, люди просто отключают.
 
-## 4. The release
+## 4. Выпуск
 
 ```powershell
 cd F:\Gitea\LexiQode2
 powershell -ExecutionPolicy Bypass -File scripts\build-app.ps1
 ```
 
-The version comes from `app/package.json`; the script runs both test suites,
-stages `dist\LexiQode-<version>-win32-x64`, and writes the archive plus its
-`.sha256` beside it. Then:
+Версия берётся из `app/package.json`; скрипт прогоняет оба набора тестов,
+собирает `dist\LexiQode-<version>-win32-x64` и кладёт рядом архив и его `.sha256`.
+Затем:
 
 ```powershell
 gh release create v0.2.0 `
@@ -167,34 +169,34 @@ gh release create v0.2.0 `
   --title "LexiQode 0.2.0" --notes-file docs\release-notes\v0.2.0.md
 ```
 
-The notes file is the 0.2.0 section of `CHANGELOG.md` with a download paragraph on
-top, so the release page opens with what this version is and how to run it. The
-full changelog stays in the repository for anyone reading the history.
+Файл заметок — это раздел 0.2.0 из `CHANGELOG.md` с абзацем про скачивание сверху,
+поэтому страница выпуска начинается с того, что это за версия и как её запустить.
+Полный журнал изменений остаётся в репозитории для тех, кто читает историю.
 
-Or, in the interface: **Releases ▸ Draft a new release ▸ choose the tag ▸ attach
-both files**. GitHub's own limits are 2 GB per asset and 100 characters per tag;
-the archive is about 157 MB, which is fine, and exactly why the application is
-never committed to the tree.
+Или в интерфейсе: **Releases ▸ Draft a new release ▸ выбрать тег ▸ приложить оба
+файла**. Ограничения самого GitHub — 2 ГБ на файл и 100 символов на тег; архив
+занимает около 157 МБ, что нормально, и ровно поэтому приложение никогда не
+попадает в дерево репозитория.
 
-Before attaching, check the archive itself - it is built from this tree, and a
-stray settings file inside it would publish a key without ever appearing in the
-history:
+Перед тем как прикладывать, проверьте сам архив: он собран из этого дерева, и
+залетевший в него файл настроек опубликовал бы ключ, никогда не появившись в
+истории:
 
 ```powershell
 tar -tf dist\LexiQode-0.2.0-win32-x64.zip | Select-String -Pattern 'settings\.json|\.env|\.key$|\.pem$|logs/'
 ```
 
-An empty result is the expected result.
+Пустой результат — ожидаемый результат.
 
-## 5. Checklist
+## 5. Чек-лист
 
-- [ ] Repository visibility changed to public.
-- [ ] Description set to the one-sentence version above.
-- [ ] Topics added (the list above).
-- [ ] Social preview uploaded (`docs/social-preview.png`).
-- [ ] Discussions enabled; issue templates added.
-- [ ] `v0.2.0` tag pushed.
-- [ ] Release published with the archive and the `.sha256` attached.
-- [ ] The clone URL in both READMEs points at the name that will be kept.
-- [ ] Search the published page for a key once more, from outside the account, in
-      a private window: `https://github.com/<owner>/<repo>/search?q=sk-`
+- [ ] Видимость репозитория изменена на публичную.
+- [ ] Описание выставлено то самое, из одного предложения.
+- [ ] Темы добавлены (список выше).
+- [ ] Social preview загружен (`docs/social-preview.png`).
+- [ ] Discussions включены; шаблоны issue добавлены.
+- [ ] Тег `v0.2.0` отправлен в репозиторий.
+- [ ] Выпуск опубликован с приложенными архивом и `.sha256`.
+- [ ] Строка клонирования в обоих README указывает на имя, которое останется.
+- [ ] Ещё раз поищите ключ на опубликованной странице, снаружи аккаунта, в
+      приватном окне: `https://github.com/<owner>/<repo>/search?q=sk-`

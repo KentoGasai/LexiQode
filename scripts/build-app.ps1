@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Build the portable LexiQode distribution.
 
@@ -126,14 +126,21 @@ foreach ($cache in '__pycache__', '.pytest_cache', '.ruff_cache', '.mypy_cache',
 $readme = @"
 LexiQode $version
 
-Run LexiQode.exe. Nothing is installed and no administrator rights are needed.
+Запустите LexiQode.exe. Ничего не устанавливается, права администратора не нужны.
 
-The assistant half needs Python 3.11 or newer on PATH; the editor half runs
-without it.
+Ассистенту нужен Python 3.11 или новее в PATH; редактор работает и без него.
 
-Settings live in %APPDATA%\LexiQode (app-settings.json for this window,
-settings.json for the agent, which is also where the endpoint and the model id
-are stored). Transcripts and other per-machine data live in %LOCALAPPDATA%\LexiQode.
+Настройки лежат в %APPDATA%\LexiQode (app-settings.json — настройки окна,
+settings.json — настройки агента, там же хранятся адрес модели и её
+идентификатор). Разговоры и остальные данные этой машины — в %LOCALAPPDATA%\LexiQode.
+Обе папки находятся ВНЕ этой папки с программой.
+
+Обновления берутся из Releases на GitHub: приложение проверяет новую версию при
+запуске (это можно выключить в настройках, Ctrl+,) и по команде «Справка ▸
+Проверить обновления…». Если вы согласитесь установить новую версию, приложение
+закроется, архив распакуется на место текущей версии тем же путём, и новая версия
+запустится сама. Настройки и данные при этом не трогаются, потому что лежат вне
+папки программы.
 "@
 Set-Content -Path (Join-Path $bundle 'README.txt') -Value $readme -Encoding UTF8
 

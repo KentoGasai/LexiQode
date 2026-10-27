@@ -1,109 +1,108 @@
-# LexiQode core protocol, version 1
+# Протокол ядра LexiQode, версия 1
 
-The contract between the editor extension and a running core process. Both sides
-are versioned together: the core reports its contract version in the handshake
-and in `/api/health`, and the extension must refuse to drive a core whose
-`protocol` it does not implement.
+Контракт между расширением редактора и запущенным процессом ядра. Обе стороны
+версионируются вместе: ядро сообщает версию контракта в рукопожатии и в
+`/api/health`, а расширение обязано отказаться управлять ядром, чей `protocol` оно
+не реализует.
 
-## 1. Process model
+## 1. Модель процесса
 
-One core process serves exactly one workspace.
+Один процесс ядра обслуживает ровно одну рабочую папку.
 
-| step | who | what |
+| шаг | кто | что делает |
 |---|---|---|
-| 1 | extension | look for a runtime descriptor, then validate it (see 3) |
-| 2a | extension | valid descriptor: reuse it, do not spawn a second core |
-| 2b | extension | no descriptor: spawn `python -m lexiqode serve <folder>` |
-| 3 | extension | talk to `base_url` with the token from the handshake |
-| 4 | extension | on dispose: close the child's stdin (see 8) |
+| 1 | расширение | ищет описание запущенного процесса, затем проверяет его (см. 3) |
+| 2a | расширение | описание верно: использует его, не запускает второе ядро |
+| 2b | расширение | описания нет: запускает `python -m lexiqode serve <папка>` |
+| 3 | расширение | обращается к `base_url` с токеном из рукопожатия |
+| 4 | расширение | при завершении: закрывает stdin дочернего процесса (см. 8) |
 
-The core binds to `127.0.0.1` only. It never listens on a public interface.
+Ядро слушает только `127.0.0.1` и никогда не открывается на публичном интерфейсе.
 
-## 2. Handshake
+## 2. Рукопожатие
 
-The core writes **exactly one line** to stdout and never writes to stdout again.
-Everything else - logs, warnings, tracebacks - goes to stderr.
+Ядро пишет в stdout **ровно одну строку** и больше в stdout не пишет ничего. Всё
+остальное — журналы, предупреждения, трассировки — идёт в stderr.
 
 ```
-lexiqode-core-ready {"product":"LexiQode","version":"1.0.0","protocol":1,"base_url":"http://127.0.0.1:52926","host":"127.0.0.1","port":52926,"token":"<48 hex>","pid":12345,"workspace":"C:/work/project","started_at":"2026-01-01T12:00:00"}
+lexiqode-core-ready {"product":"LexiQode","version":"0.2.0","protocol":1,"base_url":"http://127.0.0.1:52926","host":"127.0.0.1","port":52926,"token":"<48 hex>","pid":12345,"workspace":"C:/work/project","started_at":"2026-01-01T12:00:00"}
 ```
 
-Parse it as: strip the literal prefix `lexiqode-core-ready`, then parse the rest
-as JSON. A reader that sees anything else on the first line must treat the launch
-as failed and surface the child's stderr.
+Разбирать так: отбросить буквальный префикс `lexiqode-core-ready`, остальное
+разобрать как JSON. Читатель, увидевший в первой строке что-то другое, обязан
+считать запуск неудачным и показать stderr дочернего процесса.
 
-If the core cannot start - missing workspace, unusable settings - it prints no
-handshake at all, explains the problem on stderr, and exits with code 1.
+Если ядро не может запуститься — нет рабочей папки, настройки непригодны, — оно
+вообще не печатает рукопожатие, объясняет проблему в stderr и выходит с кодом 1.
 
-## 3. Runtime descriptor
+## 3. Описание запущенного процесса
 
-On startup the core writes `core-runtime.json` next to its settings
-(`%APPDATA%\LexiQode\core-runtime.json` on Windows, or the path in
-`LEXIQODE_RUNTIME_FILE`). It carries the same fields as the handshake plus
-`written_at`.
+При запуске ядро пишет `core-runtime.json` рядом со своими настройками (в Windows
+— `%APPDATA%\LexiQode\core-runtime.json`, либо по пути из `LEXIQODE_RUNTIME_FILE`).
+В нём те же поля, что в рукопожатии, плюс `written_at`.
 
-An extension must validate a descriptor in two steps before reusing it:
+Прежде чем использовать описание, расширение обязано проверить его в два шага:
 
-1. the recorded `pid` must still be alive;
-2. `GET /api/health` on the recorded `base_url` must answer, and its `workspace`
-   must equal the folder being opened.
+1. записанный `pid` должен быть ещё жив;
+2. `GET /api/health` по записанному `base_url` должен ответить, и его `workspace`
+   должен совпадать с открываемой папкой.
 
-A descriptor that fails either check is stale, and the extension starts a fresh
-core. The core removes its own descriptor on exit, and only a descriptor that
-carries its own pid, so a restarted core never deletes a newer one.
+Описание, не прошедшее любую из проверок, устарело, и расширение запускает новое
+ядро. Своё описание ядро удаляет при выходе и только то, которое несёт его
+собственный pid, поэтому перезапущенное ядро никогда не удалит более новое.
 
-## 4. Authentication
+## 4. Аутентификация
 
-Every endpoint except `/api/health` requires the token from the handshake:
+Каждая конечная точка, кроме `/api/health`, требует токен из рукопожатия:
 
 ```
 Authorization: Bearer <token>
 ```
 
-`GET /api/events` additionally accepts `?token=<token>`, because a webview
-`EventSource` cannot set headers. That is the only endpoint where a query token
-is accepted. The token is generated per process and never persisted, so it dies
-with the core.
+`GET /api/events` дополнительно принимает `?token=<token>`, потому что
+`EventSource` во встроенном окне не умеет задавать заголовки. Это единственная
+точка, где токен принимается в строке запроса. Токен создаётся на процесс и нигде
+не сохраняется, поэтому умирает вместе с ядром.
 
-## 5. Endpoints
+## 5. Конечные точки
 
-| method | path | auth | body | returns |
+| метод | путь | токен | тело | возвращает |
 |---|---|---|---|---|
-| GET | `/api/health` | no | - | liveness and identity |
-| GET | `/api/state` | yes | - | workspace, profile, agent settings, tools, modes, turn |
-| GET | `/api/settings` | yes | - | redacted settings with resolved paths |
-| GET | `/api/tools` | yes | - | tool names, families, enabled flags |
-| GET | `/api/history` | yes | - | the conversation messages |
-| GET | `/api/ping` | yes | - | `{"ok":true,"pong":true}` |
-| GET | `/api/events` | yes | - | SSE stream (section 6) |
-| PUT | `/api/settings` | yes | patch | updated redacted settings |
-| POST | `/api/chat` | yes | `{"message": "...", "mode"?: "agent", "tools"?: bool}` | `202` once the turn started |
-| POST | `/api/cancel` | yes | - | cancels the turn and pending approvals |
-| POST | `/api/reset` | yes | - | clears the conversation |
-| POST | `/api/approval` | yes | `{"id","approved","remember","reason"}` | `{"delivered": bool}` |
-| POST | `/api/models` | yes | `{"profile"?: "id"}` | model ids from the endpoint |
-| POST | `/api/complete` | yes | `{"prompt", "system"?, "max_tokens"?, "temperature"?, "profile"?, "model"?}` | `{"text": "..."}` |
-| POST | `/api/shutdown` | yes | - | stops the core |
+| GET | `/api/health` | нет | - | живость и идентичность |
+| GET | `/api/state` | да | - | рабочая папка, профиль, настройки агента, инструменты, режимы, ход |
+| GET | `/api/settings` | да | - | настройки с вырезанным ключом и разрешёнными путями |
+| GET | `/api/tools` | да | - | имена инструментов, семейства, флаги включения |
+| GET | `/api/history` | да | - | сообщения разговора |
+| GET | `/api/ping` | да | - | `{"ok":true,"pong":true}` |
+| GET | `/api/events` | да | - | поток SSE (раздел 6) |
+| PUT | `/api/settings` | да | частичное изменение | обновлённые настройки с вырезанным ключом |
+| POST | `/api/chat` | да | `{"message": "...", "mode"?: "agent", "tools"?: bool}` | `202`, как только ход начался |
+| POST | `/api/cancel` | да | - | отменяет ход и все ожидающие подтверждения |
+| POST | `/api/reset` | да | - | очищает разговор |
+| POST | `/api/approval` | да | `{"id","approved","remember","reason"}` | `{"delivered": bool}` |
+| POST | `/api/models` | да | `{"profile"?: "id"}` | идентификаторы моделей от эндпоинта |
+| POST | `/api/complete` | да | `{"prompt", "system"?, "max_tokens"?, "temperature"?, "profile"?, "model"?}` | `{"text": "..."}` |
+| POST | `/api/shutdown` | да | - | останавливает ядро |
 
-Responses are JSON. Failures use the right status code and a body of the shape
-`{"ok":false,"error":"<human readable>"}`. Statuses used: `400` bad request,
-`401` missing or wrong token, `404` unknown route, `502` the configured model
-endpoint failed.
+Ответы — JSON. Ошибки используют подходящий код состояния и тело вида
+`{"ok":false,"error":"<понятный текст>"}`. Используются состояния: `400` неверный
+запрос, `401` токен отсутствует или неверен, `404` неизвестный маршрут, `502`
+настроенный адрес модели не ответил.
 
-`/api/chat` returns as soon as the turn has been queued; it does **not** stream.
-Progress and the answer arrive on `/api/events`. Only one turn runs per workspace
-at a time, and a second `POST /api/chat` while one is running is rejected with
-`400`.
+`/api/chat` отвечает сразу, как только ход поставлен в очередь; он **не**
+транслирует поток. Ход и ответ приходят в `/api/events`. В одной рабочей папке
+одновременно выполняется только один ход, и второй `POST /api/chat` во время
+выполнения отклоняется с `400`.
 
-`tools: false` runs that turn without offering any tool schema to the model. It
-exists for requests whose answer is a piece of text rather than a plan. The flag
-applies to one turn only and defaults to `true`.
+`tools: false` выполняет этот ход, не предлагая модели ни одной схемы
+инструмента. Это нужно для запросов, ответ на которые — текст, а не план. Флаг
+действует только на один ход и по умолчанию равен `true`.
 
-### Modes
+### Режимы
 
-`mode` names what the agent may do during that turn. The core owns the list and
-publishes it in `GET /api/state` under `modes`, so the editor's menu cannot drift
-from what is enforced:
+`mode` называет то, что агент может делать во время этого хода. Список
+принадлежит ядру и публикуется в `GET /api/state` под `modes`, поэтому меню
+редактора не может разойтись с тем, что действительно применяется:
 
 ```json
 {
@@ -116,127 +115,129 @@ from what is enforced:
 }
 ```
 
-| id | may do | may not do |
+| id | что можно | что нельзя |
 |---|---|---|
-| `agent` | everything: read, write, run commands | - |
-| `ask` | read files, list, glob, grep | write, run anything |
-| `plan` | the same reads, and produce a plan | write, run anything |
-| `debug` | the same reads, plus `run_command` to reproduce | write |
-| `review` | the same reads, to critique the current diff | write, run anything |
+| `agent` | всё: читать, писать, запускать команды | - |
+| `ask` | читать файлы, list, glob, grep | писать, что-либо запускать |
+| `plan` | те же чтения и составление плана | писать, что-либо запускать |
+| `debug` | те же чтения плюс `run_command`, чтобы воспроизвести | писать |
+| `review` | те же чтения, чтобы разобрать текущий diff | писать, что-либо запускать |
 
-`tools: null` means the mode places no restriction. The narrowing is enforcement,
-not advice: a tool the mode excludes is left out of the request **and** refused by
-the registry with `error: "not_available_in_mode"` if the model calls it anyway.
-`steps` is a ceiling for that mode; the configured `agent.max_steps` still wins
-when it is lower.
+`tools: null` означает, что режим ничего не ограничивает. Сужение — это
+принуждение, а не совет: инструмент, исключённый режимом, не попадает в запрос
+**и** отклоняется реестром с `error: "not_available_in_mode"`, если модель всё же
+его вызовет. `steps` — потолок для этого режима; настроенное `agent.max_steps`
+всё равно побеждает, если оно ниже.
 
-The chosen mode applies to one turn. `/api/state` reports the mode of the last
-turn (or started one) in `turn.mode`. An unknown id is rejected with `400` and a
-message naming the accepted values.
+Выбранный режим действует один ход. `/api/state` сообщает режим последнего (или
+начатого) хода в `turn.mode`. Неизвестный идентификатор отклоняется с `400` и
+сообщением, где перечислены допустимые значения.
 
-`/api/complete` is a third kind of request: a one-shot completion that is **not**
-a turn. It does not touch the conversation, it cannot call a tool, and it uses
-its own model client, so it never collides with a running turn and never appears
-in the transcript. `system` is optional; the result is the model's text verbatim.
+`/api/complete` — третий вид запроса: одиночное дополнение, которое **не**
+является ходом. Оно не трогает разговор, не может вызывать инструменты и
+использует собственный клиент модели, поэтому никогда не сталкивается с идущим
+ходом и никогда не появляется в истории. `system` необязателен; результат — текст
+модели как есть.
 
-`PUT /api/settings` accepts a partial patch:
+`PUT /api/settings` принимает частичное изменение:
 
 ```json
 {"agent": {"max_steps": 12}, "profile": {"id": "default", "model": "my-model"}}
 ```
 
-Unknown fields are ignored. The patch is written to disk and the next turn picks
-it up. An API key is never returned by any endpoint in clear text: a profile
-carries `has_api_key` instead.
+Неизвестные поля игнорируются. Изменение записывается на диск, и следующий ход
+его подхватывает. Ключ API не возвращается ни одной точкой в открытом виде: у
+профиля вместо него есть `has_api_key`.
 
-### Resynchronising
+### Восстановление состояния
 
-The event stream never replays past events. A replayed delta cannot be told apart
-from a fresh one and would duplicate assistant text, so on connect - and after
-any reconnect - a client rebuilds its view from `GET /api/state` and
-`GET /api/history`, then follows the stream from that point.
+Поток событий никогда не повторяет прошедшие события. Повторённую дельту нельзя
+отличить от свежей, и она продублировала бы текст ассистента, поэтому при
+подключении — и после любого переподключения — клиент заново строит свою картину
+из `GET /api/state` и `GET /api/history` и только потом следует за потоком.
 
-## 6. Event stream
+## 6. Поток событий
 
-`GET /api/events` is `text/event-stream`. Frames are standard SSE:
+`GET /api/events` — это `text/event-stream`. Кадры — обычный SSE:
 
 ```
 event: text_delta
 data: {"text":"Hel"}
 ```
 
-A comment frame `: ping` is sent every 15 seconds so an idle proxy does not close
-the connection. A client must ignore comment frames. The first frame is always:
+Кадр-комментарий `: ping` отправляется каждые 15 секунд, чтобы простаивающий
+прокси не закрыл соединение. Клиент обязан игнорировать кадры-комментарии. Первый
+кадр всегда такой:
 
 ```
 event: ready
 data: {"protocol":1}
 ```
 
-### Turn events
+### События хода
 
-| event | payload | meaning |
+| событие | полезная нагрузка | смысл |
 |---|---|---|
-| `turn_start` | `model`, `profile`, `mode` | a turn began |
-| `step_start` | `step`, `max_steps` | a model round trip began |
-| `text_delta` | `text` | append to the assistant answer |
-| `reasoning_delta` | `text` | scratchpad text; show separately, never as the answer |
-| `tool_call_delta` | `index`, `name` | a tool name was resolved; display only |
-| `assistant_text` | `text` | the complete assistant message of the step |
-| `tool_start` | `id`, `name`, `arguments` | a tool began running |
-| `approval_request` | `id`, `tool`, `family`, `summary`, `detail` | the core is blocked, waiting for section 7 |
-| `tool_end` | `id`, `name`, `ok`, `elapsed_ms`, `meta`, `content` | a tool finished |
-| `error` | `message`, `status` (optional) | the turn could not continue |
-| `turn_end` | `stopped`, `steps`, `tool_calls`, `usage` | the turn is over |
+| `turn_start` | `model`, `profile`, `mode` | ход начался |
+| `step_start` | `step`, `max_steps` | начался один обмен с моделью |
+| `text_delta` | `text` | дописать к ответу ассистента |
+| `reasoning_delta` | `text` | текст рассуждений; показывать отдельно и никогда как ответ |
+| `tool_call_delta` | `index`, `name` | имя инструмента определено; только для показа |
+| `assistant_text` | `text` | полное сообщение ассистента за этот шаг |
+| `tool_start` | `id`, `name`, `arguments` | инструмент начал работу |
+| `approval_request` | `id`, `tool`, `family`, `summary`, `detail` | ядро заблокировано и ждёт раздел 7 |
+| `tool_end` | `id`, `name`, `ok`, `elapsed_ms`, `meta`, `content` | инструмент завершился |
+| `error` | `message`, `status` (необязательно) | ход не может продолжаться |
+| `turn_end` | `stopped`, `steps`, `tool_calls`, `usage` | ход закончился |
 
-`turn_end.stopped` is one of `completed`, `max_steps`, `cancelled`, `error`.
+`turn_end.stopped` — одно из `completed`, `max_steps`, `cancelled`, `error`.
 
-`tool_end.content` is truncated to 4000 characters for display; `meta` carries
-tool-specific facts, for example `{"path":"src/app.py","changed":true}` for a
-write or `{"exit_code":0}` for a command. When a tool was skipped because the
-turn was already cancelled, the frame carries `"cancelled": true`.
+`tool_end.content` обрезается до 4000 символов для показа; `meta` несёт
+специфичные для инструмента факты, например `{"path":"src/app.py","changed":true}`
+для записи или `{"exit_code":0}` для команды. Если инструмент был пропущен,
+потому что ход уже отменён, кадр несёт `"cancelled": true`.
 
-An `error` frame does not close the stream. An `error` and a `turn_end` may both
-appear for the same turn, always in that order.
+Кадр `error` не закрывает поток. Кадры `error` и `turn_end` могут прийти для
+одного хода оба, и всегда именно в этом порядке.
 
-## 7. Approvals
+## 7. Подтверждения
 
-Writes and shell commands are gated. The handshake is deliberately synchronous:
-the tool call blocks until it is answered, so the model cannot proceed behind the
-user's back.
+Запись файлов и команды оболочки требуют разрешения. Рукопожатие намеренно
+синхронное: вызов инструмента блокируется, пока не получит ответ, поэтому модель
+не может пойти дальше за спиной у пользователя.
 
-1. the core emits `approval_request` with a unique `id`;
-2. `GET /api/state` lists the same id in `pending_approvals`;
-3. the user decides;
-4. the extension posts `POST /api/approval`;
-5. the tool runs, or fails with `denied: <reason>`, and that text goes back to
-   the model as the tool result.
+1. ядро отправляет `approval_request` с уникальным `id`;
+2. `GET /api/state` перечисляет тот же id в `pending_approvals`;
+3. пользователь решает;
+4. расширение отправляет `POST /api/approval`;
+5. инструмент выполняется — или падает с `denied: <причина>`, и этот текст
+   возвращается модели как результат инструмента.
 
-Rules the extension must respect:
+Правила, которые расширение обязано соблюдать:
 
-* `remember: true` clears the matching per-family flag
-  (`agent.approve_writes` or `agent.approve_commands`) for the rest of the
-  session, so later calls of that family stop asking.
-* If nobody answers, the request expires after 300 seconds and is treated as a
-  **refusal**. A closed window must never turn into an approved write.
-* `POST /api/cancel` refuses every pending approval.
-* `{"delivered": false}` means the id was already resolved or had expired. Show
-  that; do not retry.
+* `remember: true` снимает соответствующий флаг семейства
+  (`agent.approve_writes` или `agent.approve_commands`) до конца сессии, так что
+  последующие вызовы этого семейства больше не спрашивают.
+* Если никто не ответил, запрос истекает через 300 секунд и считается
+  **отказом**. Закрытое окно никогда не должно превращаться в разрешённую запись.
+* `POST /api/cancel` отказывает всем ожидающим подтверждениям.
+* `{"delivered": false}` означает, что id уже разрешён или истёк. Покажите это; не
+  повторяйте запрос.
 
-## 8. Shutdown
+## 8. Остановка
 
-Closing the child's stdin is the portable way to stop a core: the process
-finishes the current work, stops the server, removes its runtime descriptor and
-exits with code 0. `POST /api/shutdown` does the same over HTTP, and `SIGINT` /
-`SIGTERM` are honoured as well.
+Закрытие stdin дочернего процесса — переносимый способ остановить ядро: процесс
+заканчивает текущую работу, останавливает сервер, удаляет своё описание
+запущенного процесса и выходит с кодом 0. `POST /api/shutdown` делает то же самое
+по HTTP, а `SIGINT` / `SIGTERM` тоже принимаются.
 
-## 9. Compatibility rules
+## 9. Правила совместимости
 
-* The `protocol` integer changes only when a frame or an endpoint changes shape
-  in a way an older extension cannot read. Adding an optional field or a new
-  event type does not require a bump.
-* A client must ignore unknown events and unknown payload fields rather than
-  failing.
-* The handshake prefix and the stdout rule are the startup contract; the HTTP and
-  SSE shapes above are the runtime contract. Both are covered by the tests in
-  `core/tests/` and by `scripts/smoke_core.py`.
+* Целое `protocol` меняется только тогда, когда кадр или конечная точка меняют
+  форму так, что старое расширение не сможет это прочитать. Добавление
+  необязательного поля или нового типа события повышения не требует.
+* Клиент обязан игнорировать неизвестные события и неизвестные поля нагрузки, а
+  не падать на них.
+* Префикс рукопожатия и правило про stdout — это контракт запуска; формы HTTP и
+  SSE выше — контракт работы. Оба покрыты тестами в `core/tests/` и
+  `scripts/smoke_core.py`.

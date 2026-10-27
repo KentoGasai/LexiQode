@@ -1,127 +1,131 @@
-# Roadmap
+# План развития
 
-Where this is going: a Windows IDE where the agent is not a sidebar that talks,
-but a participant that uses the same tools the editor does - and where the tools
-it can use are not limited to the ones shipped in this repository.
+Куда всё идёт: IDE для Windows, где агент — не боковая панель, которая
+разговаривает, а участник, пользующийся теми же инструментами, что и редактор, и
+где инструменты, доступные агенту, не ограничены теми, что лежат в этом
+репозитории.
 
-Two rules for this file. A version is planned, not promised: order and dates move
-when the measurement disagrees with the plan. And nothing is listed as shipped
-unless it is in a release: the "Now" section describes 0.2.0 exactly, and
-everything below it is work that does not exist in the application yet.
+В этом файле два правила. Версия планируется, а не обещается: порядок и сроки
+сдвигаются, когда измерение расходится с планом. И ничего не помечено как
+готовое, пока оно не в выпуске: раздел «Сейчас» описывает ровно 0.2.0, а всё ниже
+— работа, которой в приложении пока нет.
 
-## Now - 0.2.0
+## Сейчас — 0.2.0
 
-An editor with a working assistant, on your own endpoint.
+Редактор с работающим ассистентом на вашем собственном адресе модели.
 
-* Monaco editor with tabs, find in file, unsaved-change markers, line endings
-  preserved.
-* File tree that follows the disk, a right-click menu, quick open, find in files
-  with streaming results and cancellation.
-* Git panel: staged and unstaged separated, diffs, stage, unstage, discard,
-  commit, branch switching.
-* A real PowerShell session in the bottom panel.
-* Assistant: streaming answers, folded reasoning, one line of tools per turn,
-  approvals, cancel, five modes (Agent, Ask, Plan, Debug, Review).
-* Chats saved as documents and opened in tabs; context gauge and automatic
-  compaction; the context window and the answer budget are configurable.
-* Dark and light themes, Russian and English, an OpenAI-compatible endpoint and
-  no other network access.
+* Редактор Monaco с вкладками, поиском в файле, отметками несохранённых правок,
+  сохранением переводов строк как они были.
+* Дерево файлов, следящее за диском, меню по правому щелчку, быстрый переход к
+  файлу, поиск по всем файлам с результатами по мере поступления и отменой.
+* Панель git: подготовленное и изменённое раздельно, diff, подготовка, снятие,
+  отмена, коммит, переключение ветки.
+* Настоящая сессия PowerShell в нижней панели.
+* Ассистент: потоковый ответ, свёрнутые рассуждения, одна строка на ход про
+  вызовы инструментов, подтверждения, отмена, пять режимов (Agent, Ask, Plan,
+  Debug, Review).
+* Разговоры сохраняются документами и открываются вкладками; счётчик контекста и
+  автоматическое сжатие; окно контекста и бюджет ответа настраиваются.
+* Тёмная и светлая темы, русский и английский языки, OpenAI-совместимый адрес
+  модели и никакого другого доступа в сеть.
 
-## 0.3.0 - the agent becomes a participant
+## 0.3.0 — агент становится участником
 
-The assistant today works on the conversation, one turn at a time. This release is
-about it working on the *project*.
+Сегодня ассистент работает с разговором, ход за ходом. Этот выпуск — про то, что он
+работает с *проектом*.
 
-* **Inline edits** in the editor: select code, ask for a change, review it in a
-  diff before it lands. The core already answers one-shot requests; the editor
-  needs the surface.
-* **Multi-file work with a review step**: a change that spans several files is
-  presented as one diff, applied or rejected as a whole.
-* **A real diff view** in the window, so a write is reviewed where it happens
-  rather than trusted.
-* **Checkpoints in the conversation**: rewind to the state before a step, and
-  re-run from there. Undo stops being "close the file without saving".
-* **A tool that reads the project's own index**: symbols and references, not only
-  files and text, so a rename does not become a search for a string.
+* **Правки прямо в редакторе:** выделить код, попросить изменение, посмотреть его в
+  diff до того, как оно ляжет. Ядро уже отвечает на одиночные запросы; редактору
+  нужна поверхность.
+* **Работа с несколькими файлами и шаг проверки:** изменение, затрагивающее
+  несколько файлов, показывается одним diff и принимается или отклоняется целиком.
+* **Настоящий просмотр diff** в окне, чтобы запись проверяли там, где она
+  происходит, а не доверяли ей.
+* **Контрольные точки в разговоре:** вернуться к состоянию до шага и запустить
+  заново оттуда. Отмена перестаёт быть «закрыть файл без сохранения».
+* **Инструмент, читающий собственный индекс проекта:** символы и ссылки, а не
+  только файлы и текст, чтобы переименование не превращалось в поиск строки.
 
-## 0.4.0 - MCP: the tools stop being ours
+## 0.4.0 — MCP: инструменты перестают быть нашими
 
-Model Context Protocol is the direction the ecosystem has settled on, and it is
-the point at which this stops being an IDE with a fixed tool set.
+Model Context Protocol — то направление, на котором сошлась экосистема, и точка, в
+которой это перестаёт быть IDE с фиксированным набором инструментов.
 
-* **An MCP client in the core**: servers declared in settings, their tools
-  registered beside the built-in ones, and each one shown in the approval prompt
-  the way a local tool is.
-* **Transport**: stdio first, then streamable HTTP, because a local server is
-  what a user starts with.
-* **Per-server trust**: an MCP server is third-party code with access to the
-  workspace; approvals, timeouts and output limits are per server, not global.
-* **A server list in the settings** with its tool inventory, what it last
-  answered, and how to turn one off.
+* **Клиент MCP в ядре:** серверы объявляются в настройках, их инструменты
+  регистрируются рядом со встроенными, и каждый показывается в запросе
+  подтверждения так же, как локальный инструмент.
+* **Транспорт:** сначала stdio, затем streamable HTTP, потому что локальный
+  сервер — это то, с чего пользователь начинает.
+* **Доверие к каждому серверу отдельно:** сервер MCP — это сторонний код с
+  доступом к рабочей папке; подтверждения, таймауты и пределы вывода настраиваются
+  на сервер, а не на всё сразу.
+* **Список серверов в настройках** с их инструментами, тем, что они ответили в
+  последний раз, и тем, как отключить один из них.
 
-Nothing of this exists yet. The protocol and the settings shape will be written
-down in `docs/protocol.md` before the code, as the core protocol was.
+Ничего из этого пока нет. Протокол и форма настроек будут записаны в
+`docs/protocol.md` до кода — так же, как это было сделано с протоколом ядра.
 
-## 0.5.0 - Skills: procedure, not just tools
+## 0.5.0 — Skills: не только инструменты, но и порядок работы
 
-Tools do one thing; a skill is a procedure for doing a thing well - how this
-project writes migrations, tests, releases or pull requests.
+Инструмент делает одну вещь; навык — это порядок, как делать вещь хорошо: как в
+этом проекте пишутся миграции, тесты, выпуски или pull request'ы.
 
-* **Skills as files in the repository** (`.lexiqode/skills/*.md`) with a
-  description the model sees and a body it reads when the task matches.
-* **Progressive disclosure**: a skill states its trigger and its steps; the body
-  is read only when the skill is chosen, because a prompt that carries every
-  procedure is a prompt that fits nothing.
-* **Project rules and skills in one place**, so "how we do things here" is
-  versioned with the code and reviewable in a pull request.
-* **MCP prompts as skills** where a server offers them.
+* **Навыки как файлы в репозитории** (`.lexiqode/skills/*.md`) с описанием,
+  которое видит модель, и текстом, который она читает, когда задача совпала.
+* **Постепенное раскрытие:** навык объявляет своё условие срабатывания и шаги;
+  текст читается только когда навык выбран, потому что запрос, несущий в себе
+  каждую процедуру, не подходит ни для чего.
+* **Правила проекта и навыки в одном месте**, чтобы «как у нас принято» хранилось
+  вместе с кодом и проверялось в pull request'е.
+* **Запросы MCP как навыки** там, где сервер их предлагает.
 
-## 0.6.0 - several agents, and the others the user already has
+## 0.6.0 — несколько агентов и те, что уже есть у пользователя
 
-* **Subagents**: a task that can be split is handed to a worker with its own
-  context, and only the result comes back to the main conversation.
-* **Parallel reads**: the exploration phase of a task runs concurrently instead of
-  one tool call at a time.
-* **Other agents as tools**: a CLI agent installed on the machine (its own login,
-  its own model) can be called like any other tool, with the result returned to
-  the conversation.
-* **The terminal as a first-class tool**: a long-running command the agent can
-  start, read and stop, in the panel the user can watch.
+* **Подагенты:** задачу, которую можно разделить, отдают исполнителю с собственным
+  контекстом, и в основной разговор возвращается только результат.
+* **Параллельное чтение:** этап изучения задачи идёт одновременно, а не по одному
+  вызову за раз.
+* **Другие агенты как инструменты:** агент командной строки, установленный на
+  машине (со своим входом и своей моделью), вызывается как любой другой
+  инструмент, а результат возвращается в разговор.
+* **Терминал как полноценный инструмент:** долгая команда, которую агент может
+  запустить, читать и остановить, в панели, которую пользователь видит.
 
-## 1.0.0 - what 1.0 has to mean
+## 1.0.0 — что должно означать 1.0
 
-1.0 is not a feature count; it is a promise about breaking things.
+1.0 — это не количество возможностей, а обещание про совместимость.
 
-* **The settings and protocol contract freeze.** A configuration or an external
-  client written against 1.0 keeps working through 1.x.
-* **A published extension surface** for MCP servers, skills and tools, with the
-  version of the contract they were written against stated in the handshake.
-* **Session portability**: conversations and settings that survive a machine
-  change, in a format documented well enough for another tool to read.
-* **Remote work**: the core reachable over a network the user controls, with the
-  token and the workspace boundary treated as security boundaries rather than
-  conveniences.
-* **A release process**: a signed and reproducible build, and the digest
-  published beside it.
+* **Заморозка контракта настроек и протокола.** Конфигурация или внешний клиент,
+  написанный под 1.0, работает и во всех 1.x.
+* **Опубликованная поверхность расширений** для серверов MCP, навыков и
+  инструментов, с указанием версии контракта, под который они написаны, в
+  рукопожатии.
+* **Переносимость сессий:** разговоры и настройки, переживающие смену машины, в
+  формате, описанном достаточно подробно, чтобы его прочитал другой инструмент.
+* **Работа по сети:** ядро, доступное по сети, которой управляет пользователь, где
+  токен и граница рабочей папки считаются границами безопасности, а не удобством.
+* **Процесс выпуска:** подписанная и воспроизводимая сборка, а рядом с ней —
+  опубликованный дайджест.
 
-## Not planned
+## Не планируется
 
-Saying no is part of a roadmap.
+Уметь говорить «нет» — часть плана развития.
 
-* **A hosted service.** Model access is the user's endpoint; there is no account,
-  no telemetry, and no code path that talks to a server this project runs.
-* **Shipping a model.** The application ships no weights and no licence for one.
-* **A Linux or macOS build before 1.0.** The core is platform-neutral and the
-  window is Electron, so the port is not the hard part - the terminal handling and
-  the path rules are, and both are Windows-first today.
-* **A plugin marketplace.** Extensions arrive as files in the repository (skills)
-  or as MCP servers the user names. A marketplace is a supply-chain problem
-  before it is a feature.
+* **Облачный сервис.** Доступ к модели — это адрес пользователя; нет ни учётной
+  записи, ни телеметрии, ни кода, который обращается к серверу, который
+  поддерживает этот проект.
+* **Поставка модели.** Приложение не поставляет ни весов, ни лицензии на них.
+* **Сборка для Linux или macOS до 1.0.** Ядро не зависит от платформы, а окно —
+  Electron, так что перенос — не самая сложная часть: сложны работа с терминалом и
+  правила путей, и сегодня и то и другое сделано прежде всего для Windows.
+* **Магазин расширений.** Расширения приходят файлами в репозитории (навыки) или
+  серверами MCP, которые пользователь называет сам. Магазин — это сначала проблема
+  цепочки поставок, а уже потом возможность.
 
-## How the order is chosen
+## Как выбирается порядок
 
-An item moves up when a measurement shows it is what limits the work: the
-assistant that did not answer was not a missing feature but a blocked process,
-and finding that out took instrumenting a real window. Probes in `app/scripts/`
-exist for that reason, and every release in this file is expected to leave them
-greener than it found them.
+Пункт поднимается выше, когда измерение показывает, что именно он ограничивает
+работу: ассистент, который не отвечал, был не отсутствующей возможностью, а
+заблокированным процессом, и чтобы это выяснить, понадобилось инструментировать
+настоящее окно. Замеры в `app/scripts/` существуют ровно поэтому, и ожидается, что
+после каждого выпуска из этого файла их становится больше, а не меньше.

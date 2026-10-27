@@ -1,28 +1,29 @@
-# LexiQode core
+# Ядро LexiQode
 
-The agent runtime behind the LexiQode editor extension. One process per
-workspace, driven over a small HTTP API with a single SSE event stream.
+Среда выполнения агента, стоящая за расширением редактора LexiQode. Один процесс
+на рабочую папку, управляемый через небольшой HTTP API с единственным потоком
+событий SSE.
 
-It is deliberately editor-agnostic: the same session object serves the VSCodium
-extension, the terminal REPL and one-shot CLI runs, and the tests drive it with
-no editor and no network at all.
+Ядро намеренно не зависит от редактора: один и тот же объект сессии обслуживает
+расширение для VSCodium, REPL в терминале и одиночные запуски из командной строки,
+а тесты гоняют его вообще без редактора и без сети.
 
-## Install
+## Установка
 
 ```bash
 cd core
-python -m pip install -r requirements.txt      # httpx, nothing else
-python -m lexiqode tools                       # sanity check
+python -m pip install -r requirements.txt      # httpx, больше ничего
+python -m lexiqode tools                       # проверка, что всё на месте
 ```
 
-Python 3.10 or newer. There is no other runtime dependency: the HTTP server and
-the whole tool layer are standard library only.
+Нужен Python 3.10 или новее. Других зависимостей времени выполнения нет: сервер
+HTTP и весь слой инструментов написаны только на стандартной библиотеке.
 
-## Configure a model
+## Настройка модели
 
-Any endpoint that speaks `/chat/completions` works with it: a hosted gateway, a
-local runtime, or your own proxy. Nothing here assumes a vendor, and the core
-never contacts an endpoint you did not configure.
+Подойдёт любой адрес, который умеет `/chat/completions`: облачный шлюз, локальная
+среда выполнения или ваш собственный прокси. Здесь нет предположений о
+поставщике, и ядро никогда не обращается к адресу, который вы не указывали.
 
 ```bash
 python -m lexiqode config init
@@ -32,58 +33,62 @@ python -m lexiqode config set profile.default.api_key   sk-...
 python -m lexiqode doctor
 ```
 
-Environment variables override the file, which is what makes scripted runs
-possible without touching disk: `LEXIQODE_BASE_URL`, `LEXIQODE_API_KEY`,
-`LEXIQODE_MODEL`, `LEXIQODE_PROFILE`.
+Переменные окружения перекрывают файл — именно это делает возможными
+автоматизированные запуски, не трогающие диск: `LEXIQODE_BASE_URL`,
+`LEXIQODE_API_KEY`, `LEXIQODE_MODEL`, `LEXIQODE_PROFILE`.
 
-## Run
+## Запуск
 
 ```bash
 python -m lexiqode run  "add a --json flag to the CLI and test it"
-python -m lexiqode chat                       # interactive
-python -m lexiqode serve . --port 0           # what the editor runs
+python -m lexiqode chat                       # интерактивно
+python -m lexiqode serve . --port 0           # то, что запускает редактор
 ```
 
-`serve` prints exactly one line on stdout - the handshake - and sends everything
-else to stderr. The extension parses that line and nothing else, so no
-diagnostic may ever be written to stdout. `../docs/protocol.md` is the contract.
+`serve` печатает в stdout ровно одну строку — рукопожатие — и отправляет всё
+остальное в stderr. Расширение разбирает эту строку и больше ничего, поэтому ни
+одна диагностика не должна попадать в stdout. Контракт описан в
+`../docs/protocol.md`.
 
-## Tools
+## Инструменты
 
-Seven built-in tools, grouped by the approval policy that governs them:
+Семь встроенных инструментов, сгруппированных по политике подтверждений, которая
+ими управляет:
 
-| tool | family | asks for approval |
+| инструмент | семейство | спрашивает подтверждение |
 |---|---|---|
-| `read_file`, `list_dir`, `glob`, `grep` | read | no |
-| `write_file`, `edit_file` | write | yes |
-| `run_command` | command | yes |
+| `read_file`, `list_dir`, `glob`, `grep` | чтение | нет |
+| `write_file`, `edit_file` | запись | да |
+| `run_command` | команда | да |
 
-Every path a tool receives is resolved by `ToolContext.resolve`, which refuses
-anything outside the workspace root. A refusal comes back to the model as a
-failed tool call, so it can adapt instead of retrying the same action.
+Любой путь, который получает инструмент, разрешается через `ToolContext.resolve`,
+и всё, что вне корня рабочей папки, отклоняется. Отказ возвращается модели как
+неудачный вызов инструмента, чтобы она могла подстроиться, а не повторять то же
+действие.
 
-## Layout
+## Устройство
 
 ```
 lexiqode/
-  config.py          settings, paths, OpenAI-compatible model profiles
-  daemon.py          runtime descriptor, Windows-safe pid liveness, health probe
+  config.py          настройки, пути, OpenAI-совместимые профили модели
+  daemon.py          описание запущенного процесса, проверка pid в Windows, проверка живости
   cli.py             serve / run / chat / tools / doctor / config
-  llm/               streaming chat-completions client
-  agent/             prompt, tools, approval policy, step loop
-  server/            session state and the HTTP/SSE transport
-tests/               no network, no editor
+  llm/               потоковый клиент chat-completions
+  agent/             запрос, инструменты, политика подтверждений, цикл шагов
+  server/            состояние сессии и транспорт HTTP/SSE
+tests/               без сети, без редактора
 ```
 
-## Tests
+## Тесты
 
 ```bash
 cd core
 python -m unittest discover -s tests -t .
 ```
 
-The suite covers settings round trips, SSE decoding against `httpx.MockTransport`,
-tool containment and approval, the step loop with a scripted model, the HTTP API
-including auth and the approval handshake, and the CLI handshake in a real child
-process. `../scripts/smoke_core.py` additionally runs the core against a real
-OpenAI-compatible HTTP server, end to end.
+Набор покрывает чтение и запись настроек, разбор SSE через `httpx.MockTransport`,
+ограничение путей и подтверждения в инструментах, цикл шагов со
+«запрограммированной» моделью, HTTP API вместе с проверкой токена и рукопожатием
+подтверждения, а также рукопожатие CLI в настоящем дочернем процессе. Дополнительно
+`../scripts/smoke_core.py` прогоняет ядро от начала до конца против настоящего
+OpenAI-совместимого HTTP-сервера.
