@@ -9,7 +9,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { parseStatus, parseLog, parseBranches, parseDiff } = require('../src/shared/git');
+const { parseStatus, parseLog, parseBranches, parseDiff, parseCommitFiles } = require('../src/shared/git');
 
 const SEP = '\u001f';
 
@@ -107,4 +107,21 @@ test('a diff is split into hunks with the file header kept apart', () => {
   assert.equal(parsed.hunks[0].header, '@@ -1,2 +1,3 @@');
   assert.deepEqual(parsed.hunks[0].lines, [' one', '+two', ' three']);
   assert.match(parsed.header, /diff --git/);
+});
+
+test('a commit file list reads the status letter and the paths', () => {
+  const files = parseCommitFiles(
+    ['M\tsrc/changed.js', 'A\tsrc/new.js', 'D\tsrc/gone.js', 'R100\tsrc/old.js\tsrc/renamed.js'].join('\n')
+  );
+  assert.equal(files.length, 4);
+  assert.deepEqual(files[0], { status: 'M', from: '', path: 'src/changed.js' });
+  assert.deepEqual(files[1], { status: 'A', from: '', path: 'src/new.js' });
+  assert.deepEqual(files[2], { status: 'D', from: '', path: 'src/gone.js' });
+  assert.deepEqual(files[3], { status: 'R', from: 'src/old.js', path: 'src/renamed.js' });
+});
+
+test('an empty commit file list is empty, not a broken record', () => {
+  assert.deepEqual(parseCommitFiles(''), []);
+  assert.deepEqual(parseCommitFiles(undefined), []);
+  assert.deepEqual(parseCommitFiles('\n\n'), []);
 });

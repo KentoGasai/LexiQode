@@ -10,7 +10,7 @@ from __future__ import annotations
 #: Release version of the product. It names the same release as
 #: ``app/package.json``, which is what the artefact and the tag carry: two
 #: numbers for one product is how a bug report starts with a question.
-__version__ = "0.2.3"
+__version__ = "0.2.4"
 
 #: Contract version spoken between the extension and the core. Bump it when an
 #: endpoint or an event changes shape in a way that older peers cannot read.

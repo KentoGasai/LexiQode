@@ -307,6 +307,12 @@ class AgentLoop:
                 "ok": result.ok,
                 "elapsed_ms": result.elapsed_ms,
                 "meta": result.meta,
+                # What a write did to a file, so the editor can show it as a
+                # diff. The window cannot work this out for itself: it would have
+                # to read the file before the tool ran, and a local write finishes
+                # before that read does. The tool is the only thing that knows
+                # both sides, so it reports them.
+                "change": result.change,
                 "content": preview,
             },
         )

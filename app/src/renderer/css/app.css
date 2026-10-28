@@ -639,6 +639,123 @@ kbd {
   display: none;
 }
 
+/*
+ * The three views that share the editor's place: the code editor, a coloured
+ * diff, and a commit's file list. Only one is shown at a time, and each fills
+ * the box, so switching between them does not move the tab strip or the panel.
+ */
+.editor__diff,
+.editor__commit {
+  position: absolute;
+  inset: 0;
+  min-width: 0;
+  min-height: 0;
+}
+
+.editor__diff[hidden],
+.editor__commit[hidden] {
+  display: none;
+}
+
+.editor__commit {
+  overflow: auto;
+  padding: 14px 16px;
+}
+
+.commitview__head {
+  display: grid;
+  gap: 4px;
+  padding-bottom: 12px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.commitview__subject {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.commitview__meta {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+
+.commitview__body {
+  margin-top: 6px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.commitview__files {
+  display: grid;
+  gap: 1px;
+}
+
+.commitview__file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.commitview__file:hover {
+  background: var(--surface-2);
+}
+
+.commitview__badge {
+  flex: 0 0 auto;
+  min-width: 74px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10.5px;
+  text-align: center;
+  text-transform: lowercase;
+  background: var(--surface-3);
+  color: var(--text-dim);
+}
+
+.commitview__badge[data-kind="added"] {
+  background: rgba(70, 177, 123, 0.18);
+  color: var(--ok);
+}
+
+.commitview__badge[data-kind="deleted"] {
+  background: rgba(224, 101, 95, 0.18);
+  color: var(--danger);
+}
+
+.commitview__badge[data-kind="modified"] {
+  background: rgba(216, 161, 58, 0.18);
+  color: var(--warn);
+}
+
+.commitview__badge[data-kind="renamed"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.commitview__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
 /* ---------------------------------------------------------------- panel */
 
 .panel {
@@ -1055,11 +1172,58 @@ kbd {
   white-space: nowrap;
 }
 
+/*
+ * Fetch, pull and push, on one row under the branch.
+ *
+ * Three equal buttons rather than a row that wraps: the panel is dragged narrow
+ * routinely, and a wrapped row of remote actions reads as a different set of
+ * actions each time the width changes.
+ */
+.git__syncrow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  padding: 0 8px 8px;
+}
+
+.git__sync {
+  min-width: 0;
+  padding: 4px 6px;
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git__sync:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .commit {
   display: grid;
   gap: 6px;
   padding: 8px;
   border-bottom: 1px solid var(--border);
+}
+
+/*
+ * A commit row is a button, so it has to look like the list rows around it
+ * rather than like a form control: the browser's own button styling is undone
+ * and the hover is the same one the file rows use.
+ */
+.hit--button {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hit--button:hover {
+  background: var(--surface-2);
 }
 
 /* ------------------------------------------------------------------- chat */
@@ -1329,6 +1493,175 @@ kbd {
   font-family: var(--mono);
   font-size: 11px;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/*
+ * The files a turn changed, as a block of its own in the transcript.
+ *
+ * It is not inside the action group on purpose: the actions are a log of what
+ * the agent did, and the change is the result. Under "N actions" the result was
+ * hidden behind a disclosure that has nothing to do with it - reported as "you
+ * hid the changed file under Actions".
+ */
+.changes {
+  display: grid;
+  gap: 4px;
+  margin: 6px 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.changes__label {
+  color: var(--text-faint);
+  font-size: 10.5px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.changes__list {
+  display: grid;
+  gap: 2px;
+}
+
+.change {
+  display: grid;
+  gap: 0;
+}
+
+.change__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.change__toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.change__toggle:hover {
+  background: var(--surface-3);
+}
+
+.change__icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  color: var(--accent);
+}
+
+.change__icon svg {
+  width: 13px;
+  height: 13px;
+}
+
+.change__path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text);
+}
+
+.change__stat {
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.change__open {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.change__open:hover {
+  background: var(--surface-3);
+}
+
+/*
+ * The changed lines, and only those.
+ *
+ * An added line is green and a removed one red, the way a diff reads; the few
+ * unchanged lines around them are context, so the change is not shown floating
+ * without a place. The whole file is deliberately not drawn - that would bury
+ * the change in the file, which is the opposite of the point.
+ */
+.change__body {
+  margin: 2px 0 4px 19px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  overflow: auto;
+  max-height: 320px;
+}
+
+.change__body[hidden] {
+  display: none;
+}
+
+.change__diff {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  min-width: 0;
+}
+
+.change__line {
+  display: flex;
+  gap: 8px;
+  padding: 0 8px;
+  white-space: pre;
+}
+
+.change__line[data-kind="add"] {
+  background: rgba(70, 177, 123, 0.16);
+  color: var(--ok);
+}
+
+.change__line[data-kind="del"] {
+  background: rgba(224, 101, 95, 0.16);
+  color: var(--danger);
+}
+
+.change__line[data-kind="ctx"] {
+  color: var(--text-faint);
+}
+
+.change__sign {
+  flex: 0 0 10px;
+  text-align: center;
+  user-select: none;
+}
+
+.change__text {
+  min-width: 0;
   overflow-wrap: anywhere;
 }
 
@@ -2508,6 +2841,56 @@ kbd {
 .monaco-editor .suggest-widget,
 .monaco-editor .monaco-list-row {
   line-height: normal;
+}
+
+/*
+ * The suggestion list has to fit inside the editor, or it is not shown at all.
+ *
+ * Monaco gives the widget a fixed `width: 430px` and, with
+ * `fixedOverflowWidgets`, positions it against the *window* rather than against
+ * the editor: its own layout caps the width to the window, not to the editor. In
+ * a window where the editor is narrower than 430px - the assistant panel and the
+ * sidebar are both open, or the window is simply not wide - the list runs past
+ * the editor's right edge and under the assistant panel, and the part that is
+ * covered is the signature, which is the reason the list is open. Reported as
+ * "the hints do not fit", and sometimes "the last hint is not visible".
+ *
+ * `--editor-width` and `--editor-height` are measured and published by
+ * `editor.js`, because a percentage cannot express them: the widget's containing
+ * block is the viewport, so `100%` would be the window. Capping the width to the
+ * editor and the height to the editor keeps the whole list inside it, so what
+ * Monaco decided to show is what is painted.
+ *
+ * The height matters as much as the width, and it was the second half of the
+ * report: with the terminal panel open the editor is short, and a list capped to
+ * a fraction of the *window* was taller than the editor, so it was pushed down
+ * until its last row sat flush against the panel - "a small panel at the bottom
+ * covers the last hint". Capped to the editor, Monaco has room to flip the list
+ * above the caret instead.
+ *
+ * `!important` is load-bearing rather than lazy: Monaco writes its own
+ * window-based `max-width` as an *inline* style on the widget, and an inline
+ * style beats every stylesheet rule. Measured with `probe-suggest-fit.cjs` - the
+ * widget inherited `--editor-width: 168px` and still computed `max-width: 900px`
+ * until this rule was marked important.
+ */
+.monaco-editor .suggest-widget {
+  max-width: var(--editor-width, 100%) !important;
+  max-height: var(--editor-height, 60vh) !important;
+}
+
+.monaco-editor .suggest-widget .monaco-list .monaco-list-row .contents {
+  min-width: 0;
+}
+
+.monaco-editor .suggest-widget .monaco-list .monaco-list-row .contents .main {
+  min-width: 0;
+}
+
+.monaco-editor .suggest-widget .monaco-list .monaco-list-row .contents .main .right {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /*

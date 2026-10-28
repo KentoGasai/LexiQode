@@ -310,7 +310,8 @@ class WriteFileTool(Tool):
             raise ToolError(f"{context.relative(path)} is a directory")
         content = str(arguments.get("content") or "")
         existed = path.exists()
-        if existed and _read_text(path) == content:
+        before = _read_text(path) if existed else ""
+        if existed and before == content:
             return ToolResult(ok=True, content=f"{context.relative(path)} is already up to date",
                               meta={"changed": False})
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -324,6 +325,7 @@ class WriteFileTool(Tool):
             ok=True,
             content=f"{verb} {context.relative(path)} ({lines} lines)",
             meta={"path": context.relative(path), "changed": True, "created": not existed},
+            change={"path": context.relative(path), "before": before, "after": content},
         )
 
 
@@ -385,4 +387,5 @@ class EditFileTool(Tool):
             ok=True,
             content=f"replaced {changed} occurrence(s) in {context.relative(path)}",
             meta={"path": context.relative(path), "changed": True, "occurrences": changed},
+            change={"path": context.relative(path), "before": text, "after": updated},
         )

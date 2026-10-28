@@ -179,4 +179,31 @@ function parseDiff(stdout) {
   return { header: header.join('\n'), hunks };
 }
 
-module.exports = { parseStatus, parseLog, parseBranches, parseDiff };
+/**
+ * The files a commit touched, from `git show --name-status`.
+ *
+ * The status letter is git's own: `A` added, `M` modified, `D` deleted, `R`
+ * renamed, `C` copied, `T` type changed. A rename carries two paths, so the
+ * record is read as "status, then one path, or two for a rename or a copy" -
+ * which is the shape git documents and the shape a file list needs.
+ */
+function parseCommitFiles(stdout) {
+  if (!stdout) return [];
+  const files = [];
+  for (const rawLine of stdout.split(/\r?\n/)) {
+    const line = rawLine.replace(/\s+$/, '');
+    if (!line) continue;
+    const parts = line.split('\t');
+    const status = (parts[0] || '').trim();
+    if (!status) continue;
+    const letter = status[0];
+    if (letter === 'R' || letter === 'C') {
+      files.push({ status: letter, from: parts[1] || '', path: parts[2] || parts[1] || '' });
+      continue;
+    }
+    files.push({ status: letter, from: '', path: parts[1] || '' });
+  }
+  return files;
+}
+
+module.exports = { parseStatus, parseLog, parseBranches, parseDiff, parseCommitFiles };

@@ -87,13 +87,19 @@ const api = {
   git: {
     status: () => call(CHANNELS.git.status),
     diff: (path, staged) => call(CHANNELS.git.diff, { path, staged }),
+    show: (hash) => call(CHANNELS.git.show, hash),
+    commitView: (hash) => call(CHANNELS.git.commitView, hash),
+    commitFile: (hash, path) => call(CHANNELS.git.commitFile, { hash, path }),
     log: (limit) => call(CHANNELS.git.log, limit),
     branches: () => call(CHANNELS.git.branches),
     stage: (paths) => call(CHANNELS.git.stage, paths),
     unstage: (paths) => call(CHANNELS.git.unstage, paths),
     discard: (paths) => call(CHANNELS.git.discard, paths),
     commit: (message) => call(CHANNELS.git.commit, message),
-    checkout: (name) => call(CHANNELS.git.checkout, name)
+    checkout: (name) => call(CHANNELS.git.checkout, name),
+    fetch: () => call(CHANNELS.git.fetch),
+    pull: () => call(CHANNELS.git.pull),
+    push: () => call(CHANNELS.git.push)
   },
   terminal: {
     create: (options) => call(CHANNELS.terminal.create, options),

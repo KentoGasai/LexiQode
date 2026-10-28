@@ -152,6 +152,36 @@ class ToolUseTest(LoopTestCase):
         loop.run("rename the second line")
         self.assertIn("line 2", (self.workspace / "hello.txt").read_text(encoding="utf-8"))
 
+    def test_a_write_reaches_the_window_as_both_sides_of_the_change(self) -> None:
+        """The editor draws a diff from the event, so the event has to carry it.
+
+        The window cannot read the file before the tool runs without racing the
+        write, so the two sides travel on `tool_end.change` - and a read tool,
+        which changes nothing, must not carry one.
+        """
+        loop, _ = self.build(
+            [
+                tool_chunks(
+                    "edit_file",
+                    {"path": "hello.txt", "old_text": "line two", "new_text": "line 2"},
+                ),
+                text_chunks("Edited."),
+            ]
+        )
+        loop.run("rename the second line")
+
+        change = self.payload("tool_end")["change"]
+        self.assertEqual(change["path"], "hello.txt")
+        self.assertIn("line two", change["before"])
+        self.assertIn("line 2", change["after"])
+
+    def test_a_read_tool_carries_no_change(self) -> None:
+        loop, _ = self.build(
+            [tool_chunks("read_file", {"path": "hello.txt"}), text_chunks("Read.")]
+        )
+        loop.run("read hello.txt")
+        self.assertIsNone(self.payload("tool_end")["change"])
+
     def test_tool_failure_is_fed_back_and_the_model_can_recover(self) -> None:
         loop, client = self.build(
             [

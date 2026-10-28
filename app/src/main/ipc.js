@@ -149,6 +149,9 @@ function registerIpc({
   // ------------------------------------------------------------------- git
   handle(CHANNELS.git.status, () => git.status());
   handle(CHANNELS.git.diff, (event, payload) => git.diff(payload?.path, { staged: Boolean(payload?.staged) }));
+  handle(CHANNELS.git.show, (event, hash) => git.show(hash));
+  handle(CHANNELS.git.commitView, (event, hash) => git.commitView(hash));
+  handle(CHANNELS.git.commitFile, (event, payload) => git.commitFile(payload?.hash, payload?.path));
   handle(CHANNELS.git.log, (event, limit) => git.log(limit || 50));
   handle(CHANNELS.git.branches, () => git.branches());
   handle(CHANNELS.git.stage, (event, paths) => git.stage(paths));
@@ -156,6 +159,9 @@ function registerIpc({
   handle(CHANNELS.git.discard, (event, paths) => git.discard(paths));
   handle(CHANNELS.git.commit, (event, message) => git.commit(message));
   handle(CHANNELS.git.checkout, (event, name) => git.checkout(name));
+  handle(CHANNELS.git.fetch, () => git.fetch());
+  handle(CHANNELS.git.pull, () => git.pull());
+  handle(CHANNELS.git.push, () => git.push());
 
   // -------------------------------------------------------------- terminal
   handle(CHANNELS.terminal.create, (event, options) =>

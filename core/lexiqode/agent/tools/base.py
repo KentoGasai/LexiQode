@@ -48,6 +48,12 @@ class ToolResult:
     content: str
     elapsed_ms: int = 0
     meta: dict[str, Any] = field(default_factory=dict)
+    #: What a write did to a file, for the editor to show as a diff:
+    #: ``{"path": str, "before": str, "after": str}``. Kept apart from ``meta``
+    #: because ``meta`` is small facts the window prints as JSON, while this is
+    #: two whole documents - and because a tool that changes nothing leaves it
+    #: empty, which is what tells the window not to offer a diff at all.
+    change: dict[str, Any] | None = None
 
     @classmethod
     def failure(cls, message: str, **meta: Any) -> "ToolResult":

@@ -116,6 +116,14 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
     /** What this turn did to the conversation to keep it inside the window. */
     compaction: null,
     tools: new Map(),
+    /**
+     * Every file this turn changed, in the order it was changed.
+     *
+     * A turn that edits five files otherwise leaves five chips scattered through
+     * the action list, and "what did it touch" has to be answered by reading all
+     * of them. One list answers it at a glance.
+     */
+    changedFiles: new Map(),
     approvals: new Map(),
     context: null,
     /**
@@ -349,6 +357,150 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
   }
 
   /**
+   * The files this turn changed, as a block of its own in the transcript.
+   *
+   * It is deliberately *not* inside the action group. The actions are a log of
+   * what the agent did; the change is the result, and the result is what a
+   * person reads. Putting it under "N actions" hid it behind a disclosure that
+   * has nothing to do with it - reported as "you hid the changed file under
+   * Actions".
+   *
+   * Each file opens in place, in the chat, showing only the lines that changed -
+   * the same thing a diff shows, without leaving the conversation. "Open file"
+   * is the other half: the same change, in the editor, where it can be read in
+   * full.
+   */
+  function renderChanges() {
+    const created = activeTurn();
+    if (!state.changedFiles.size) {
+      if (created.changes) {
+        created.changes.node.remove();
+        delete created.changes;
+      }
+      return;
+    }
+    if (!created.changes) {
+      const node = el('div', { class: 'changes' });
+      const head = el('div', { class: 'changes__head' });
+      const label = el('span', { class: 'changes__label' });
+      const list = el('div', { class: 'changes__list' });
+      head.append(label);
+      node.append(head, list);
+      // After the actions and before the answer: what it did, then what changed,
+      // then what it says about it.
+      created.node.insertBefore(node, created.body);
+      created.changes = { node, label, list };
+    }
+    const record = created.changes;
+    record.label.textContent = t('chat.changedFiles', { count: state.changedFiles.size });
+    clear(record.list);
+    for (const [path, change] of state.changedFiles) {
+      record.list.append(changeBlock(path, change));
+    }
+  }
+
+  /**
+   * One changed file: a row that opens its diff in place, and a way into the
+   * editor.
+   *
+   * The diff is built from the two sides the tool reported, and only the lines
+   * that differ are drawn - an added line green, a removed one red, with a few
+   * lines of context around each change. Showing the whole file would bury the
+   * change in the file, which is the opposite of the point.
+   */
+  function changeBlock(path, change) {
+    const node = el('div', { class: 'change' });
+    const head = el('div', { class: 'change__head' });
+    const toggle = el('button', {
+      class: 'change__toggle',
+      type: 'button',
+      title: t('chat.showChange', { path })
+    }, [
+      el('span', { class: 'change__icon', html: icon('git') }),
+      el('span', { class: 'change__path', text: path }),
+      el('span', { class: 'change__stat', text: changeStat(change) })
+    ]);
+    const open = el('button', {
+      class: 'change__open',
+      type: 'button',
+      text: t('chat.openFile'),
+      title: t('chat.openFileHint', { path }),
+      onclick: () => void editor?.open?.(path)
+    });
+    head.append(toggle, open);
+    const body = el('div', { class: 'change__body', hidden: true });
+    let built = false;
+    toggle.addEventListener('click', () => {
+      if (!built) {
+        body.append(changeDiff(change));
+        built = true;
+      }
+      body.hidden = !body.hidden;
+      node.dataset.open = String(!body.hidden);
+    });
+    node.append(head, body);
+    return node;
+  }
+
+  /** `+3 −1`, so a row says how much changed before it is opened. */
+  function changeStat(change) {
+    const lines = diffLines(change.before, change.after);
+    const added = lines.filter((line) => line.kind === 'add').length;
+    const removed = lines.filter((line) => line.kind === 'del').length;
+    return `+${added} −${removed}`;
+  }
+
+  /**
+   * The changed lines of one file, as rows.
+   *
+   * A plain line-by-line comparison, not a full diff algorithm: the two sides
+   * come from the same tool call, so the change is local and a common prefix and
+   * suffix is enough to find it. That keeps this honest - it shows what changed
+   * and nothing it invented - and cheap enough to run while the turn is still
+   * arriving.
+   */
+  function diffLines(before, after) {
+    const left = String(before ?? '').split('\n');
+    const right = String(after ?? '').split('\n');
+    let start = 0;
+    while (start < left.length && start < right.length && left[start] === right[start]) start += 1;
+    let endLeft = left.length;
+    let endRight = right.length;
+    while (endLeft > start && endRight > start && left[endLeft - 1] === right[endRight - 1]) {
+      endLeft -= 1;
+      endRight -= 1;
+    }
+    const rows = [];
+    const context = 3;
+    for (let index = Math.max(0, start - context); index < start; index += 1) {
+      rows.push({ kind: 'ctx', text: left[index] });
+    }
+    for (let index = start; index < endLeft; index += 1) rows.push({ kind: 'del', text: left[index] });
+    for (let index = start; index < endRight; index += 1) rows.push({ kind: 'add', text: right[index] });
+    for (let index = endRight; index < Math.min(right.length, endRight + context); index += 1) {
+      rows.push({ kind: 'ctx', text: right[index] });
+    }
+    return rows;
+  }
+
+  /** The changed lines, drawn with the colours a diff uses. */
+  function changeDiff(change) {
+    const rows = diffLines(change.before, change.after);
+    const pre = el('div', { class: 'change__diff' });
+    for (const row of rows) {
+      const sign = row.kind === 'add' ? '+' : row.kind === 'del' ? '−' : ' ';
+      pre.append(
+        el('div', { class: 'change__line', dataset: { kind: row.kind } }, [
+          el('span', { class: 'change__sign', text: sign }),
+          el('span', { class: 'change__text', text: row.text })
+        ])
+      );
+    }
+    if (!rows.length) pre.append(el('div', { class: 'change__line', dataset: { kind: 'ctx' }, text: t('chat.noChange') }));
+    return pre;
+  }
+
+  /**
    * One tool call: a single line while collapsed, the wire arguments and the
    * result when opened.
    *
@@ -393,6 +545,7 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
       row.stateNode.textContent = failed ? t('tool.failed') : t('tool.done');
       group.running = Math.max(0, group.running - 1);
       if (failed) group.failed += 1;
+      if (!failed) recordFileChange(row, payload);
       renderToolRow(row);
     }
     row.nameNode.textContent = row.name;
@@ -409,6 +562,29 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
      */
     if (atBottom()) group.rows.scrollTop = group.rows.scrollHeight;
     scrollIfFollowing(atBottom());
+  }
+
+  /**
+   * Offer the change a write tool made, as a diff.
+   *
+   * The two sides come from the tool itself (`payload.change`), not from the
+   * window reading the file: a local write finishes before a read issued at
+   * `tool_start` could return, so a window that tried to capture the "before"
+   * side itself would find the file already changed and show an empty diff. The
+   * tool is the only thing that knows both sides, so it reports them.
+   *
+   * A tool that changed nothing sends no `change`, and no chip appears - a chip
+   * that opens an empty diff is worse than no chip.
+   */
+  function recordFileChange(row, payload) {
+    const change = payload.change;
+    if (!change || !change.path) return;
+    const before = String(change.before ?? '');
+    const after = String(change.after ?? '');
+    if (before === after) return;
+    row.change = { path: change.path, before, after };
+    state.changedFiles.set(change.path, { before, after });
+    renderChanges();
   }
 
   /** The opened part of a row: what was sent, what came back. */
@@ -835,6 +1011,9 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
         state.turnBlocks = [];
         state.compaction = null;
         state.current = null;
+        // The changed-file list is per turn, not per step: a turn that edits
+        // three files in three steps is one answer to "what did it touch".
+        state.changedFiles.clear();
         renderRunning();
         break;
       case 'step_start': {

@@ -15,13 +15,46 @@ import { clear, el, iconButton, toast } from './ui.js';
 import { t } from './i18n.js';
 import { menuPoint, openContextMenu } from './context-menu.js';
 
-export function createGitPanel({ api, onOpenDiff, onNotice, onOpenFolder }) {
+/**
+ * The three remote actions, each with the words it needs.
+ *
+ * Written as literal keys so the dictionary test can see them: a key built from
+ * a variable is invisible to that test, and a missing one shows the raw key in
+ * the window instead of a sentence.
+ */
+const SYNC = {
+  fetch: {
+    label: 'git.fetch',
+    hint: 'git.fetchHint',
+    running: 'git.fetchRunning',
+    done: 'git.fetchDone',
+    failed: 'git.fetchFailed'
+  },
+  pull: {
+    label: 'git.pull',
+    hint: 'git.pullHint',
+    running: 'git.pullRunning',
+    done: 'git.pullDone',
+    failed: 'git.pullFailed'
+  },
+  push: {
+    label: 'git.push',
+    hint: 'git.pushHint',
+    running: 'git.pushRunning',
+    done: 'git.pushDone',
+    failed: 'git.pushFailed'
+  }
+};
+
+export function createGitPanel({ api, onOpenDiff, onOpenCommit, onNotice, onOpenFolder }) {
   const host = document.getElementById('sidebar-body');
   const title = document.getElementById('sidebar-title');
   const actions = document.getElementById('sidebar-actions');
 
   let status = null;
   let commits = [];
+  /** Which remote action is running, so its button can say so and refuse a second press. */
+  let busy = '';
   const message = el('textarea', { rows: '2', placeholder: t('git.commitPlaceholder') });
   message.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
@@ -107,6 +140,44 @@ export function createGitPanel({ api, onOpenDiff, onNotice, onOpenFolder }) {
       await refresh();
     } catch (error) {
       toast('error', error.message);
+    }
+  }
+
+  /**
+   * Fetch, pull or push, with the button that was pressed saying so.
+   *
+   * These are the three actions that talk to a remote, and each can take long
+   * enough that a silent button reads as a broken one: the button is disabled
+   * and relabelled while the command runs, and the first line of whatever git
+   * said is shown either way. A refusal is not swallowed - "no upstream",
+   * "rejected", "authentication failed" are the whole answer to why a push did
+   * not happen, and hiding them behind a generic message is how a person
+   * concludes the button does nothing.
+   *
+   * The keys are written out rather than built from the action's name, because a
+   * key assembled at runtime is a key no test can see: a typo in it would show
+   * the raw key in the window and nothing would fail.
+   */
+  async function sync(kind) {
+    if (busy) return;
+    const words = SYNC[kind];
+    if (!words) return;
+    busy = kind;
+    render();
+    try {
+      const result = await api.git[kind]();
+      const said = `${result.stdout || ''}\n${result.stderr || ''}`.trim().split('\n').filter(Boolean);
+      if (result.ok) {
+        onNotice?.(t(words.done), 'ok');
+      } else {
+        toast('error', said[0] || t(words.failed));
+      }
+      await refresh();
+    } catch (error) {
+      toast('error', error.message);
+    } finally {
+      busy = '';
+      render();
     }
   }
 
@@ -196,7 +267,7 @@ export function createGitPanel({ api, onOpenDiff, onNotice, onOpenFolder }) {
       iconButton('branch', t('git.branchPrompt'), (event) => void switchBranch(event)),
       iconButton('refresh', t('git.refresh'), () => void refresh())
     ]);
-    host.append(branch, el('div', { class: 'commit' }, [message])); 
+    host.append(branch, syncRow(), el('div', { class: 'commit' }, [message]));
 
     const stagedEntries = status.entries.filter((entry) => status.staged.includes(entry.path) || entry.kind === 'staged');
     const changedEntries = status.entries.filter((entry) => !stagedEntries.includes(entry));
@@ -211,15 +282,44 @@ export function createGitPanel({ api, onOpenDiff, onNotice, onOpenFolder }) {
       const section = el('div', { class: 'section' });
       section.append(el('div', { class: 'section__head' }, [el('span', { text: t('git.recentCommits') })]));
       for (const entry of commits) {
-        section.append(
-          el('div', { class: 'hit', title: entry.hash }, [
-            el('div', { class: 'hit__file', text: `${entry.short} · ${entry.author} · ${entry.when}` }),
-            el('div', { class: 'hit__text', text: entry.subject })
-          ])
-        );
+        // A commit is a button, not a label: the change behind it is the reason
+        // the list is there, and a row that cannot be opened is a dead end.
+        const row = el('button', {
+          class: 'hit hit--button',
+          type: 'button',
+          title: t('git.openCommit', { hash: entry.short }),
+          onclick: () => onOpenCommit?.(entry)
+        }, [
+          el('div', { class: 'hit__file', text: `${entry.short} · ${entry.author} · ${entry.when}` }),
+          el('div', { class: 'hit__text', text: entry.subject })
+        ]);
+        section.append(row);
       }
       host.append(section);
     }
+  }
+
+  /**
+   * The three actions that talk to a remote, on one row.
+   *
+   * They are grouped and labelled rather than hidden behind an icon, because
+   * "push" and "pull" are the two things a person comes to this panel to do and
+   * an unlabelled arrow is a guess. The one that is running says so and refuses
+   * a second press, so a slow network cannot be mistaken for a dead button.
+   */
+  function syncRow() {
+    const button = (kind) => {
+      const words = SYNC[kind];
+      return el('button', {
+        class: 'btn btn--ghost git__sync',
+        type: 'button',
+        text: busy === kind ? t(words.running) : t(words.label),
+        title: t(words.hint),
+        disabled: Boolean(busy),
+        onclick: () => void sync(kind)
+      });
+    };
+    return el('div', { class: 'git__syncrow' }, [button('fetch'), button('pull'), button('push')]);
   }
 
   /**

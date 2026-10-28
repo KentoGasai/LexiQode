@@ -60,9 +60,15 @@ const CHANNELS = {
     commit: 'git:commit',
     discard: 'git:discard',
     diff: 'git:diff',
+    show: 'git:show',
+    commitView: 'git:commit-view',
+    commitFile: 'git:commit-file',
     log: 'git:log',
     branches: 'git:branches',
     checkout: 'git:checkout',
+    fetch: 'git:fetch',
+    pull: 'git:pull',
+    push: 'git:push',
     changed: 'git:changed'
   },
   terminal: {

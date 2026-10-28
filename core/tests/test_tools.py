@@ -159,6 +159,28 @@ class WriteFileTest(ToolTestCase):
         self.assertTrue(result.ok)
         self.assertEqual(self.requests, [])
 
+    def test_a_write_reports_both_sides_of_the_change(self) -> None:
+        """The editor shows a diff, and it cannot work the two sides out itself.
+
+        A window that read the file before the tool ran would race the write and
+        find it already changed, so the tool - the only thing that knows both
+        sides - reports them. This is the contract the editor's diff depends on.
+        """
+        created = self.call("write_file", path="src/new.py", content="x = 1\n")
+        self.assertEqual(created.change["path"], "src/new.py")
+        self.assertEqual(created.change["before"], "", "a file that did not exist has an empty before side")
+        self.assertEqual(created.change["after"], "x = 1\n")
+
+        updated = self.call("write_file", path="src/new.py", content="x = 2\n")
+        self.assertEqual(updated.change["before"], "x = 1\n")
+        self.assertEqual(updated.change["after"], "x = 2\n")
+
+    def test_a_write_that_changes_nothing_reports_no_change(self) -> None:
+        self.call("write_file", path="src/same.py", content="same\n")
+        again = self.call("write_file", path="src/same.py", content="same\n")
+        self.assertFalse(again.meta["changed"])
+        self.assertIsNone(again.change, "an unchanged write must not offer a diff")
+
 
 class EditFileTest(ToolTestCase):
     def test_replaces_the_matched_text(self) -> None:
@@ -188,6 +210,16 @@ class EditFileTest(ToolTestCase):
     def test_identical_text_is_refused(self) -> None:
         result = self.call("edit_file", path="src/app.py", old_text="x", new_text="x")
         self.assertFalse(result.ok)
+
+    def test_an_edit_reports_both_sides_of_the_change(self) -> None:
+        result = self.call(
+            "edit_file", path="src/app.py", old_text="return 42", new_text="return 43"
+        )
+        self.assertTrue(result.ok)
+        self.assertEqual(result.change["path"], "src/app.py")
+        self.assertIn("return 42", result.change["before"])
+        self.assertIn("return 43", result.change["after"])
+        self.assertNotIn("return 43", result.change["before"])
 
 
 class SearchToolsTest(ToolTestCase):

@@ -385,3 +385,166 @@ test('the mode button is not the thing that shrinks, the model chooser is', () =
   assert.match(host, /max-width:/, 'and a limit on how much of the row it may take');
   assert.match(cssRule(css, '.modelbtn'), /width:\s*100%/, 'the chooser fills the box the layout gives it');
 });
+
+/**
+ * The source control panel can reach the remote, and a commit can be opened.
+ *
+ * Three of the four things reported about this panel were the same shape: the
+ * command existed nowhere, so the button that would have called it did not
+ * exist either. A commit could be made and never pushed, a remote could never be
+ * pulled, and a commit in the list was a label with no way to see what it
+ * changed. Each of those is a chain - a service method, a channel, a preload
+ * method, a control - and a break anywhere in it is invisible until someone
+ * presses the button, so the whole chain is checked here.
+ */
+test('the source control panel can push, pull and fetch, and open a commit', () => {
+  const panel = fs.readFileSync(path.join(JS, 'git-panel.js'), 'utf8');
+  const preload = fs.readFileSync(path.join(APP, 'src', 'preload', 'preload.js'), 'utf8');
+  const ipc = fs.readFileSync(path.join(APP, 'src', 'main', 'ipc.js'), 'utf8');
+  const service = fs.readFileSync(path.join(APP, 'src', 'main', 'git-service.js'), 'utf8');
+  const editor = fs.readFileSync(path.join(JS, 'editor.js'), 'utf8');
+  const renderer = fs.readFileSync(path.join(JS, 'main.js'), 'utf8');
+
+  for (const action of ['fetch', 'pull', 'push']) {
+    assert.match(service, new RegExp(`async ${action}\\(`), `git-service has no ${action}`);
+    assert.match(ipc, new RegExp(`CHANNELS\\.git\\.${action}`), `ipc does not register ${action}`);
+    assert.match(
+      preload,
+      new RegExp(`${action}: \\(\\) => call\\(CHANNELS\\.git\\.${action}\\)`),
+      `preload does not expose ${action}`
+    );
+    assert.match(panel, new RegExp(`button\\('${action}'`), `the panel has no ${action} button`);
+  }
+
+  assert.match(service, /async show\(/, 'git-service cannot show a commit');
+  assert.match(ipc, /CHANNELS\.git\.show/, 'ipc does not register git:show');
+  assert.match(preload, /show: \(hash\) => call\(CHANNELS\.git\.show, hash\)/, 'preload does not expose show');
+  assert.match(editor, /async function openCommit\(/, 'the editor cannot open a commit');
+  assert.match(
+    renderer,
+    /onOpenCommit: \(commit\) => void editor\.openCommit\(commit\)/,
+    'the panel is not wired to the editor'
+  );
+  assert.match(panel, /onclick: \(\) => onOpenCommit\?\.\(entry\)/, 'a commit row is not clickable');
+});
+
+/**
+ * A commit opens as a file list, and a file opens as a coloured diff.
+ *
+ * The first version of "open a commit" showed the whole patch as one document
+ * of `+` and `-` lines, which is not how a commit is read: a commit is a set of
+ * changes, one per file, and the file is what a person picks. The view is a
+ * header and a list, and each file opens a diff drawn by Monaco's diff editor -
+ * two documents compared, so an added line is green and a removed one is red.
+ * The whole chain is checked here because a break anywhere in it is invisible
+ * until someone clicks.
+ */
+test('a commit opens as a file list, and a file opens as a coloured diff', () => {
+  const service = fs.readFileSync(path.join(APP, 'src', 'main', 'git-service.js'), 'utf8');
+  const ipc = fs.readFileSync(path.join(APP, 'src', 'main', 'ipc.js'), 'utf8');
+  const preload = fs.readFileSync(path.join(APP, 'src', 'preload', 'preload.js'), 'utf8');
+  const editor = fs.readFileSync(path.join(JS, 'editor.js'), 'utf8');
+  const shared = fs.readFileSync(path.join(APP, 'src', 'shared', 'git.js'), 'utf8');
+
+  assert.match(shared, /function parseCommitFiles\(/, 'the commit file list has no parser');
+  assert.match(service, /async commitView\(/, 'git-service cannot read a commit as a view');
+  assert.match(service, /async commitFile\(/, 'git-service cannot read one file of a commit');
+  assert.match(ipc, /CHANNELS\.git\.commitView/, 'ipc does not register git:commit-view');
+  assert.match(ipc, /CHANNELS\.git\.commitFile/, 'ipc does not register git:commit-file');
+  assert.match(preload, /commitView: \(hash\) => call\(CHANNELS\.git\.commitView, hash\)/);
+  assert.match(preload, /commitFile: \(hash, path\) => call\(CHANNELS\.git\.commitFile/);
+
+  assert.match(editor, /createDiffEditor\(/, 'the diff is not drawn by Monaco\'s diff editor');
+  assert.match(editor, /function renderCommitView\(/, 'the commit view is not drawn');
+  assert.match(editor, /class: 'commitview__file'|className = 'commitview__file'/, 'the file list has no rows');
+  assert.match(editor, /openCommitFile\(tab\.commit\.hash, file\.path\)/, 'a file row does not open its diff');
+  assert.match(editor, /kind: 'commit'/, 'a commit is not a kind of tab');
+  assert.match(editor, /kind: 'diff'/, 'a diff is not a kind of tab');
+});
+
+/**
+ * A file the assistant changed is offered as a diff, the way Cursor shows it.
+ *
+ * The two sides come from the core (`tool_end.change`), not from the window
+ * reading the file: a local write finishes before a read issued at `tool_start`
+ * could return, so a window that tried to capture the "before" side itself would
+ * find the file already changed and show an empty diff. The tool is the only
+ * thing that knows both sides, so it reports them, and the window draws them.
+ */
+test('a file the assistant changed is offered as a diff', () => {
+  const chat = fs.readFileSync(path.join(JS, 'chat.js'), 'utf8');
+  const editor = fs.readFileSync(path.join(JS, 'editor.js'), 'utf8');
+  const core = fs.readFileSync(path.join(APP, '..', 'core', 'lexiqode', 'agent', 'loop.py'), 'utf8');
+  const tools = fs.readFileSync(path.join(APP, '..', 'core', 'lexiqode', 'agent', 'tools', 'fs.py'), 'utf8');
+
+  assert.match(tools, /change=\{"path": context\.relative\(path\), "before": before, "after": content\}/);
+  assert.match(tools, /change=\{"path": context\.relative\(path\), "before": text, "after": updated\}/);
+  assert.match(core, /"change": result\.change/, 'the loop does not put the change on the event');
+  assert.match(chat, /function recordFileChange\(row, payload\)/, 'the panel does not read the change');
+  assert.match(chat, /payload\.change/, 'the panel does not read the change from the event');
+  assert.match(chat, /function renderChanges\(/, 'the turn does not draw its changed files');
+  assert.match(editor, /function openChangeDiff\(/, 'the editor cannot show a change it was handed');
+});
+
+/**
+ * The change is a block of its own in the chat, opened in place.
+ *
+ * It was a chip inside the action row, which is behind two disclosures - the
+ * step's action list and the row itself - so a person had to open two things to
+ * find the one thing they came for. Reported as "you hid the changed file under
+ * Actions". It is now a block of its own in the transcript, outside the action
+ * group, that opens in place and shows only the lines that changed, with a way
+ * into the editor beside it.
+ */
+test('the change is a block of its own in the chat, opened in place', () => {
+  const chat = fs.readFileSync(path.join(JS, 'chat.js'), 'utf8');
+  const css = fs.readFileSync(path.join(RENDERER, 'css', 'app.css'), 'utf8');
+
+  // Outside the action group: inserted into the turn, not into the tools node.
+  assert.match(chat, /created\.node\.insertBefore\(node, created\.body\)/, 'the change block is not part of the turn');
+  assert.doesNotMatch(chat, /group\.node\.append\(group\.changed\)/, 'the change block is still inside the action group');
+  assert.match(chat, /class: 'changes'/, 'the change block has no class of its own');
+  assert.match(chat, /class: 'change__toggle'/, 'a changed file has no row to open');
+  assert.match(chat, /class: 'change__body', hidden: true/, 'the diff is not opened in place');
+  assert.match(chat, /body\.hidden = !body\.hidden/, 'the row does not toggle its diff');
+  // Only the changed lines, with the colours a diff uses.
+  assert.match(chat, /function diffLines\(/, 'the change is not reduced to the lines that differ');
+  assert.match(chat, /kind: 'add'/, 'added lines are not marked');
+  assert.match(chat, /kind: 'del'/, 'removed lines are not marked');
+  assert.match(chat, /dataset: \{ kind: row\.kind \}/, 'the lines carry no kind for the stylesheet');
+  // A way into the editor, beside the change.
+  assert.match(chat, /class: 'change__open'/, 'there is no way to open the file');
+  assert.match(chat, /editor\?\.open\?\.\(path\)/, 'the open button does not open the file');
+  assert.match(chat, /state\.changedFiles\.set\(/, 'the turn does not collect the files it changed');
+  assert.match(chat, /state\.changedFiles\.clear\(\)/, 'the changed-file list is not reset per turn');
+
+  assert.match(css, /\.changes \{/, 'the change block has no style');
+  assert.match(css, /\.change__line\[data-kind="add"\]/, 'added lines have no colour');
+  assert.match(css, /\.change__line\[data-kind="del"\]/, 'removed lines have no colour');
+  assert.match(css, /\.change__open/, 'the open button has no style');
+});
+
+/**
+ * The suggestion list has to fit inside the editor, or it is not shown.
+ *
+ * Monaco gives the widget a fixed 430px width and, with `fixedOverflowWidgets`,
+ * positions it against the window: its own layout caps the width to the window,
+ * not to the editor. With the assistant panel open on the right, the list runs
+ * past the editor's edge and under that panel, and the part that is covered is
+ * the signature. Reported as "the hints do not fit, sometimes the last one is
+ * not visible". The width is published by `editor.js` as `--editor-width`,
+ * because a percentage would resolve against the viewport, and the rule has to
+ * be `!important` because Monaco writes its own window-based `max-width` inline.
+ */
+test('the suggestion list is capped to the editor it is drawn in', () => {
+  const css = fs.readFileSync(path.join(RENDERER, 'css', 'app.css'), 'utf8');
+  const widget = cssRule(css, '.monaco-editor .suggest-widget');
+  assert.match(widget, /max-width:\s*var\(--editor-width/, 'the widget is capped to the editor, not the window');
+  assert.match(widget, /max-height:\s*var\(--editor-height/, 'and to the editor\'s height, or a short editor cannot hold it');
+  assert.match(widget, /!important/, 'Monaco writes its own max-width inline, so the rule has to win over it');
+  const editor = fs.readFileSync(path.join(JS, 'editor.js'), 'utf8');
+  assert.match(editor, /--editor-width/, 'the editor publishes its own width for the rule to read');
+  assert.match(editor, /--editor-height/, 'and its own height');
+  assert.match(editor, /clampSuggestWidget/, 'and moves the list back inside when its position would take it out');
+  assert.match(editor, /SUGGEST_GAP/, 'and keeps it clear of the bottom edge, where the panel below would cover it');
+});

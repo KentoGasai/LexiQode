@@ -1142,6 +1142,7 @@ async function boot() {
   git = createGitPanel({
     api,
     onOpenDiff: (path, options) => void editor.openDiff(path, options),
+    onOpenCommit: (commit) => void editor.openCommit(commit),
     onNotice: (message, kind) => toast(kind || 'info', message),
     onOpenFolder: () => void openFolder()
   });

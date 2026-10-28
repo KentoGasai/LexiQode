@@ -52,6 +52,16 @@ function lineHeightFor(fontSize) {
   return Math.round(fontSize * 1.4);
 }
 
+/**
+ * How far the suggestion list is kept clear of the editor's bottom edge.
+ *
+ * Flush against the edge is what was reported as "a small panel at the bottom
+ * covers the last hint": the last row's own border sat on the boundary, and the
+ * panel below - which begins exactly there - painted over it. A few pixels of
+ * clearance is the difference between a list that ends and a list that is cut.
+ */
+const SUGGEST_GAP = 6;
+
 const THEMES = {
   dark: {
     base: 'vs-dark',
@@ -108,6 +118,24 @@ export async function createEditor({ api, settings, onDirtyChange, onActiveChang
   const tabsHost = document.getElementById('tabs');
   const welcome = document.getElementById('welcome');
 
+  /**
+   * The two views that are not the code editor, and why they are separate nodes.
+   *
+   * A coloured diff is not a document with `+` and `-` lines: it is two
+   * documents compared, which is what Monaco's `DiffEditor` draws and what makes
+   * an added line green and a removed one red the way a person expects. The
+   * commit view is not a document at all - it is a header and a list of files -
+   * so it is plain markup. Both live beside the editor and are shown in its
+   * place, because a tab is a place in the window, not a kind of text.
+   */
+  const diffHost = document.createElement('div');
+  diffHost.className = 'editor__diff';
+  diffHost.hidden = true;
+  const commitHost = document.createElement('div');
+  commitHost.className = 'editor__commit';
+  commitHost.hidden = true;
+  container.append(diffHost, commitHost);
+
   for (const [name, theme] of Object.entries(THEMES)) {
     monaco.editor.defineTheme(`lexiqode-${name}`, { base: theme.base, inherit: true, rules: [], colors: theme.colors });
   }
@@ -158,11 +186,108 @@ export async function createEditor({ api, settings, onDirtyChange, onActiveChang
     bracketPairColorization: { enabled: true }
   });
 
+  /**
+   * The editor's own width, published for the stylesheet to cap the suggestion
+   * list with.
+   *
+   * Monaco draws the list with `fixedOverflowWidgets`, so it is positioned
+   * against the window and its own layout caps its width to the *window*, not to
+   * the editor. With the assistant panel open on the right, a list that starts
+   * at the caret and runs its full 430px therefore ends up under that panel, and
+   * the part that is covered is the signature - the reason the list is open.
+   * Measured with `scripts/probe-suggest-fit.cjs`: in a 900px window the editor
+   * was 168px wide and the list ran 372px past its right edge.
+   *
+   * A percentage cannot express this, because the widget's containing block is
+   * the viewport rather than the editor. So the width is measured here and
+   * written to a custom property the stylesheet reads; a `ResizeObserver` keeps
+   * it true when the sidebar, the assistant panel or the window itself changes
+   * size, which is exactly when the list would otherwise be clipped.
+   */
+  function publishEditorWidth() {
+    container.style.setProperty('--editor-width', `${container.clientWidth}px`);
+    // The gap is taken off here as well as in the clamp, so the stylesheet's own
+    // cap and the position correction agree about where the bottom edge is.
+    container.style.setProperty('--editor-height', `${Math.max(0, container.clientHeight - SUGGEST_GAP)}px`);
+  }
+  publishEditorWidth();
+  const widthObserver = new ResizeObserver(publishEditorWidth);
+  widthObserver.observe(container);
+
+  /**
+   * Keep the suggestion list inside the editor, not merely inside the window.
+   *
+   * Capping the width is not enough on its own: Monaco places the list at the
+   * caret and lets it overflow the editor (`allowEditorOverflow`), so a list that
+   * is narrow enough still starts at the caret and runs past the editor's right
+   * edge when the caret is near it. The stylesheet caps the width; this moves the
+   * list back inside when its position would take it out, which is the half CSS
+   * cannot do because the position is an inline style Monaco writes.
+   *
+   * It runs on the widget's own style changes rather than on a timer, so it
+   * follows every keystroke and every scroll without polling, and it only ever
+   * moves the list - it never changes its size, which stays Monaco's decision.
+   */
+  function clampSuggestWidget() {
+    const widget = container.querySelector('.suggest-widget.visible');
+    if (!widget) return;
+    const editorRect = container.getBoundingClientRect();
+    const rect = widget.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const overflowRight = rect.right - editorRect.right;
+    // The list is kept a few pixels clear of the editor's bottom edge, not flush
+    // with it. Flush is what was reported: the last row's own border sat on the
+    // boundary, and the panel below - which starts exactly there - covered it.
+    const overflowBottom = rect.bottom - (editorRect.bottom - SUGGEST_GAP);
+    if (overflowRight > 0) {
+      const left = Number.parseFloat(widget.style.left) || rect.left;
+      widget.style.left = `${Math.max(editorRect.left, left - overflowRight)}px`;
+    }
+    if (overflowBottom > 0) {
+      const top = Number.parseFloat(widget.style.top) || rect.top;
+      // Moved up by exactly what it overflows, and never above the editor: a
+      // list that is taller than the editor cannot be made to fit, and pushing
+      // it off the top would hide the first rows instead of the last.
+      widget.style.top = `${Math.max(editorRect.top, top - overflowBottom)}px`;
+    }
+  }
+
+  let clampScheduled = false;
+  const widgetObserver = new MutationObserver(() => {
+    if (clampScheduled) return;
+    clampScheduled = true;
+    requestAnimationFrame(() => {
+      clampScheduled = false;
+      clampSuggestWidget();
+    });
+  });
+  widgetObserver.observe(container, { subtree: true, attributes: true, attributeFilter: ['style', 'class'] });
+
   /** path -> { model, viewState, savedVersionId, eol, hadFinalNewline, readOnly, kind } */
   const tabs = new Map();
   let active = '';
   let saveTimer = null;
   const decorations = editor.createDecorationsCollection([]);
+
+  /**
+   * The diff editor, created once and reused.
+   *
+   * Creating one per diff would leak a DOM tree and a set of models for every
+   * file a person clicks; one instance whose models are swapped is both cheaper
+   * and what makes the view state (scroll position, folded regions) survive
+   * switching between files of the same commit.
+   */
+  const diffEditor = monaco.editor.createDiffEditor(diffHost, {
+    automaticLayout: true,
+    readOnly: true,
+    renderSideBySide: true,
+    scrollBeyondLastLine: false,
+    renderOverviewRuler: false,
+    originalEditable: false,
+    fixedOverflowWidgets: true,
+    fontFamily: '"Cascadia Code", "JetBrains Mono", Consolas, ui-monospace, monospace',
+    lineHeight: lineHeightFor(13)
+  });
 
   function currentSettings() {
     return settings();
@@ -179,6 +304,14 @@ export async function createEditor({ api, settings, onDirtyChange, onActiveChang
       lineNumbers: appearance.lineNumbers,
       renderWhitespace: appearance.renderWhitespace,
       breadcrumbs: { enabled: appearance.breadcrumbs }
+    });
+    // The diff editor is a second editor and does not inherit the first one's
+    // options: without this, a diff would be drawn at the default font size
+    // while the file beside it used the one the person chose.
+    diffEditor.updateOptions({
+      fontSize: appearance.fontSize,
+      lineHeight: lineHeightFor(appearance.fontSize),
+      renderSideBySide: appearance.wordWrap === 'off'
     });
     const theme = document.documentElement.dataset.theme === 'light' ? 'lexiqode-light' : 'lexiqode-dark';
     monaco.editor.setTheme(theme);
@@ -228,7 +361,8 @@ export async function createEditor({ api, settings, onDirtyChange, onActiveChang
 
   function isDirty(path) {
     const tab = tabs.get(path);
-    return Boolean(tab) && tab.model.getAlternativeVersionId() !== tab.savedVersionId;
+    if (!tab || tab.kind !== 'code') return false;
+    return tab.model.getAlternativeVersionId() !== tab.savedVersionId;
   }
 
   function renderTabs() {
@@ -240,12 +374,12 @@ export async function createEditor({ api, settings, onDirtyChange, onActiveChang
       const node = document.createElement('button');
       node.className = 'tab';
       node.type = 'button';
-      node.title = path;
+      node.title = tab.label || path;
       node.setAttribute('aria-selected', String(path === active));
 
       const nodeLabel = document.createElement('span');
       nodeLabel.className = 'tab__label';
-      nodeLabel.textContent = tab.kind === 'diff' ? `${label} (diff)` : label;
+      nodeLabel.textContent = tab.label || (tab.kind === 'diff' ? `${label} (diff)` : label);
       node.append(nodeLabel);
 
       if (isDirty(path)) {
@@ -273,18 +407,46 @@ export async function createEditor({ api, settings, onDirtyChange, onActiveChang
     }
   }
 
+  /**
+   * Show a tab, whichever of the three kinds of view it is.
+   *
+   * A tab is a place in the window, and the window has three kinds of place: the
+   * code editor, a coloured diff, and a commit's file list. Only one is visible
+   * at a time, and the code editor's own view state is saved before it is hidden
+   * so returning to a file lands where it was left.
+   */
   function setActive(path) {
     if (!tabs.has(path)) return;
     const previous = tabs.get(active);
     if (previous && previous.kind === 'code') previous.viewState = editor.saveViewState();
     active = path;
     const tab = tabs.get(path);
-    editor.setModel(tab.model);
-    if (tab.viewState) editor.restoreViewState(tab.viewState);
-    editor.updateOptions({ readOnly: tab.readOnly });
-    if (tab.kind === 'code') editor.focus();
+
+    const isCode = tab.kind === 'code';
+    const isDiff = tab.kind === 'diff';
+    const isCommit = tab.kind === 'commit';
+    container.hidden = false;
+    // `editor.getDomNode()` is null until the editor has a model, so the node is
+    // found in the container instead: it is the same element and it is always
+    // there once the editor has been created.
+    const codeNode = container.querySelector('.monaco-editor');
+    if (codeNode) codeNode.hidden = !isCode;
+    diffHost.hidden = !isDiff;
+    commitHost.hidden = !isCommit;
+
+    if (isCode) {
+      editor.setModel(tab.model);
+      if (tab.viewState) editor.restoreViewState(tab.viewState);
+      editor.updateOptions({ readOnly: tab.readOnly });
+      editor.focus();
+    } else if (isDiff) {
+      diffEditor.setModel({ original: tab.original, modified: tab.modified });
+      diffEditor.layout();
+    } else if (isCommit) {
+      renderCommitView(tab);
+    }
     renderTabs();
-    onActiveChange?.(tab, editor.getPosition());
+    onActiveChange?.(tab, isCode ? editor.getPosition() : null);
   }
 
   async function open(path, options = {}) {
@@ -333,7 +495,42 @@ export async function createEditor({ api, settings, onDirtyChange, onActiveChang
     if (options.line) reveal(path, options);
   }
 
-  /** Show a git diff as a read-only tab, coloured by Monaco's diff grammar. */
+  /**
+   * Put a coloured diff on screen as a read-only tab.
+   *
+   * Monaco's `DiffEditor` compares two documents, so an added line is green and
+   * a removed one is red the way a person expects - which a single document full
+   * of `+` and `-` lines is not. The two models are owned by the tab and disposed
+   * with it, so switching between files of a commit does not accumulate them.
+   */
+  function showDiffTab({ key, label, before, after, language, source }) {
+    const previous = tabs.get(key);
+    if (previous) {
+      previous.original?.dispose();
+      previous.modified?.dispose();
+    }
+    const original = monaco.editor.createModel(
+      before,
+      language,
+      monaco.Uri.parse(`diff-original:///${encodeURIComponent(key)}`)
+    );
+    const modified = monaco.editor.createModel(
+      after,
+      language,
+      monaco.Uri.parse(`diff-modified:///${encodeURIComponent(key)}`)
+    );
+    tabs.set(key, {
+      kind: 'diff',
+      original,
+      modified,
+      label,
+      readOnly: true,
+      source
+    });
+    setActive(key);
+  }
+
+  /** The working-tree diff of one file, as a coloured diff tab. */
   async function openDiff(path, { staged = false } = {}) {
     let diff;
     try {
@@ -342,26 +539,171 @@ export async function createEditor({ api, settings, onDirtyChange, onActiveChang
       onNotice?.(error.message, 'error');
       return;
     }
+    // The patch is split into the two sides the diff editor compares: lines
+    // that are not additions are the "before", lines that are not removals are
+    // the "after". This is what turns a patch into a coloured comparison.
+    const before = [];
+    const after = [];
+    for (const line of String(diff.text || '').split('\n')) {
+      if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('diff ') || line.startsWith('index ')) continue;
+      if (line.startsWith('@@')) continue;
+      if (line.startsWith('+')) after.push(line.slice(1));
+      else if (line.startsWith('-')) before.push(line.slice(1));
+      else {
+        before.push(line.startsWith(' ') ? line.slice(1) : line);
+        after.push(line.startsWith(' ') ? line.slice(1) : line);
+      }
+    }
     const key = `diff:${path}:${staged ? 'staged' : 'unstaged'}`;
-    const empty = `No differences against HEAD for ${path}${staged ? ' in the index' : ''}.`;
-    const model = monaco.editor.createModel(
-      diff.text && diff.text.trim() ? diff.text : empty,
-      'diff',
-      monaco.Uri.parse(`diff:///${encodeURIComponent(key)}`)
-    );
-    const previous = tabs.get(key);
-    if (previous) previous.model.dispose();
-    tabs.set(key, {
-      kind: 'diff',
-      model,
-      savedVersionId: model.getAlternativeVersionId(),
-      eol: '\n',
-      hadFinalNewline: true,
-      readOnly: true,
-      viewState: null,
+    showDiffTab({
+      key,
+      label: `${path} (diff)`,
+      before: before.join('\n'),
+      after: after.join('\n'),
+      language: languageFor(path),
       source: path
     });
+  }
+
+  /**
+   * Show a commit the way a person reads one: a header, then the files it
+   * changed.
+   *
+   * The list is the point. A commit is not one change but a set of them, one per
+   * file, and a single wall of patch text hides which files are even involved -
+   * which is why every editor with a history view shows the files first and the
+   * change of one file on request. Clicking a file opens its coloured diff.
+   */
+  async function openCommit(commit) {
+    const hash = typeof commit === 'string' ? commit : commit && commit.hash;
+    if (!hash) return;
+    let view;
+    try {
+      view = await api.git.commitView(hash);
+    } catch (error) {
+      onNotice?.(error.message, 'error');
+      return;
+    }
+    if (!view.ok) {
+      onNotice?.(view.error || 'the commit could not be read', 'error');
+      return;
+    }
+    const key = `commit:${view.commit.hash}`;
+    tabs.set(key, {
+      kind: 'commit',
+      label: `${view.commit.short} ${view.commit.subject}`.trim(),
+      commit: view.commit,
+      files: view.files,
+      readOnly: true,
+      source: view.commit.hash
+    });
     setActive(key);
+  }
+
+  /** One file's change inside one commit, as a coloured diff tab. */
+  async function openCommitFile(hash, path) {
+    let file;
+    try {
+      file = await api.git.commitFile(hash, path);
+    } catch (error) {
+      onNotice?.(error.message, 'error');
+      return;
+    }
+    if (file.binary) {
+      onNotice?.(t('toast.binary', { path }), 'warn');
+      return;
+    }
+    const short = String(hash).slice(0, 7);
+    showDiffTab({
+      key: `commit-file:${hash}:${path}`,
+      label: `${path} (${short})`,
+      before: file.before,
+      after: file.after,
+      language: languageFor(path),
+      source: path
+    });
+  }
+
+  /**
+   * A change the assistant made, as a coloured diff tab.
+   *
+   * The two sides are handed in rather than read from git, because the change is
+   * not committed and may not even be staged: it is the file as it was before
+   * the tool ran and as it is after, which is exactly what the window watched
+   * happen. The tab is keyed by the path so a second edit to the same file
+   * replaces the first view instead of opening a second tab for it.
+   */
+  function openChangeDiff(path, before, after, { label } = {}) {
+    showDiffTab({
+      key: `change:${path}`,
+      label: label || `${path} (${t('chat.changed')})`,
+      before: String(before ?? ''),
+      after: String(after ?? ''),
+      language: languageFor(path),
+      source: path
+    });
+  }
+
+  /**
+   * The commit's header and its file list, drawn as markup.
+   *
+   * The status letter is git's own and is shown as a word, because `M` and `A`
+   * are only obvious to someone who already knows them; the colour says the same
+   * thing at a glance for someone who does not.
+   */
+  function renderCommitView(tab) {
+    commitHost.replaceChildren();
+    const head = document.createElement('div');
+    head.className = 'commitview__head';
+    const subject = document.createElement('div');
+    subject.className = 'commitview__subject';
+    subject.textContent = tab.commit.subject;
+    const meta = document.createElement('div');
+    meta.className = 'commitview__meta';
+    meta.textContent = `${tab.commit.short} · ${tab.commit.author} · ${tab.commit.when}`;
+    head.append(subject, meta);
+    if (tab.commit.body) {
+      const body = document.createElement('div');
+      body.className = 'commitview__body';
+      body.textContent = tab.commit.body;
+      head.append(body);
+    }
+    commitHost.append(head);
+
+    const list = document.createElement('div');
+    list.className = 'commitview__files';
+    const STATUS = {
+      A: { word: t('git.statusAdded'), kind: 'added' },
+      M: { word: t('git.statusModified'), kind: 'modified' },
+      D: { word: t('git.statusDeleted'), kind: 'deleted' },
+      R: { word: t('git.statusRenamed'), kind: 'renamed' },
+      C: { word: t('git.statusCopied'), kind: 'renamed' },
+      T: { word: t('git.statusTypeChanged'), kind: 'modified' }
+    };
+    for (const file of tab.files) {
+      const described = STATUS[file.status] || { word: file.status, kind: 'modified' };
+      const row = document.createElement('button');
+      row.className = 'commitview__file';
+      row.type = 'button';
+      row.title = file.from ? `${file.from} → ${file.path}` : file.path;
+      const badge = document.createElement('span');
+      badge.className = 'commitview__badge';
+      badge.dataset.kind = described.kind;
+      badge.textContent = described.word;
+      const name = document.createElement('span');
+      name.className = 'commitview__name';
+      name.textContent = file.path;
+      row.append(badge, name);
+      row.addEventListener('click', () => void openCommitFile(tab.commit.hash, file.path));
+      list.append(row);
+    }
+    if (!tab.files.length) {
+      const empty = document.createElement('div');
+      empty.className = 'list__empty';
+      empty.textContent = t('git.commitNoFiles');
+      list.append(empty);
+    }
+    commitHost.append(list);
   }
 
   async function save(path, { quiet = false } = {}) {
@@ -397,6 +739,22 @@ export async function createEditor({ api, settings, onDirtyChange, onActiveChang
     if (saved) onNotice?.(t('toast.savedMany', { count: saved }), 'ok');
   }
 
+  /**
+   * Release whatever a tab owns.
+   *
+   * A code tab owns one model, a diff tab owns two, and a commit tab owns
+   * nothing but its own markup. Disposing the wrong thing - or nothing - is how
+   * a window that has been open all day accumulates models it can never free.
+   */
+  function disposeTab(tab) {
+    if (!tab) return;
+    if (tab.kind === 'code') tab.model.dispose();
+    else if (tab.kind === 'diff') {
+      tab.original?.dispose();
+      tab.modified?.dispose();
+    }
+  }
+
   async function closeTab(path) {
     const tab = tabs.get(path);
     if (!tab) return;
@@ -411,7 +769,7 @@ export async function createEditor({ api, settings, onDirtyChange, onActiveChang
     }
     const order = [...tabs.keys()];
     const index = order.indexOf(path);
-    tab.model.dispose();
+    disposeTab(tab);
     tabs.delete(path);
     if (active !== path) {
       renderTabs();
@@ -424,15 +782,17 @@ export async function createEditor({ api, settings, onDirtyChange, onActiveChang
       return;
     }
     editor.setModel(null);
+    container.hidden = true;
     renderTabs();
     onActiveChange?.(null, null);
   }
 
   function closeAll() {
-    for (const tab of tabs.values()) tab.model.dispose();
+    for (const tab of tabs.values()) disposeTab(tab);
     tabs.clear();
     active = '';
     editor.setModel(null);
+    container.hidden = true;
     renderTabs();
     onActiveChange?.(null, null);
   }
@@ -567,6 +927,9 @@ export async function createEditor({ api, settings, onDirtyChange, onActiveChang
   return {
     open,
     openDiff,
+    openCommit,
+    openCommitFile,
+    openChangeDiff,
     closeTab,
     closeAll,
     save,
