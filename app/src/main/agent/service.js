@@ -23,7 +23,12 @@ const EVENT_TYPES = [
   'tool_start',
   'tool_end',
   'step_start',
-  'error'
+  'error',
+  // The core asks for permission with this event and then blocks the tool until
+  // the window answers. It was missing from this list, so it arrived as `other`
+  // and the panel's switch never reached the branch that draws the card - the
+  // request timed out and the model was told the user had refused.
+  'approval_request'
 ];
 
 /**

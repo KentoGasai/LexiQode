@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import tempfile
 import unittest
 from pathlib import Path
 
+from lexiqode.agent.context import git_state
 from lexiqode.agent.modes import (
     MODES,
     READ_TOOLS,
@@ -135,6 +137,35 @@ class PromptTest(unittest.TestCase):
         prompt = build_system_prompt(Path("."), default_registry())
         self.assertIn("write_file:", prompt)
         self.assertNotIn("Current mode:", prompt)
+
+
+class GitStateTest(unittest.TestCase):
+    """A workspace is a repository when git says so, not when `.git` is a folder.
+
+    A linked worktree, a submodule and a clone made with `--separate-git-dir` all
+    put a *file* named `.git` in the working tree, holding a `gitdir:` pointer.
+    Testing for a directory reported every one of those as "not a repository", so
+    the agent was told its workspace had no version control while the source
+    control panel - which asks git directly - showed the branch and the changes.
+    """
+
+    def setUp(self) -> None:
+        self._temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._temp.cleanup)
+        self.workspace = Path(self._temp.name)
+
+    def test_a_folder_without_git_is_not_a_repository(self) -> None:
+        self.assertEqual(git_state(self.workspace), {"is_repo": False})
+
+    def test_a_git_file_counts_as_a_repository(self) -> None:
+        # What a worktree or a submodule has: a file, not a directory. The
+        # pointer is deliberately unresolvable - the check is about the shape of
+        # the entry, and a real gitdir would need a real repository to point at.
+        (self.workspace / ".git").write_text(
+            "gitdir: /somewhere/else/.git/worktrees/example\n", encoding="utf-8"
+        )
+        state = git_state(self.workspace)
+        self.assertTrue(state["is_repo"], "a `.git` file is a repository too")
 
 
 if __name__ == "__main__":

@@ -133,6 +133,8 @@
   "chat.stopping": "Stopping…",
   "chat.stoppedNotice": "Stopped by you: the agent ended the turn here. Send another message to carry on.",
   "chat.stepLimit": "The turn ran out of steps: its whole budget of {steps} is spent. That is a ceiling, not a failure - the next turn carries on.",
+  "chat.repeatedNotice": "The turn was stopped: the agent repeated one identical tool call without changing it. That is a sign it is stuck, not a sign it is working. Clarify the task or carry on with a new message.",
+  "chat.approvalUnavailable": "The turn was stopped: a permission prompt never reached this window, so the action was not carried out. Nothing was changed. Try again, and if it repeats, restart the assistant.",
   "chat.continue": "Carry on",
   "chat.continueHint": "Send a message asking the agent to carry on from where it stopped",
   "chat.continueMessage": "Carry on from where you stopped.",

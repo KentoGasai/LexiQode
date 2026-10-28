@@ -182,6 +182,11 @@ class ConversationStore:
         The messages themselves are not returned: a list of chats is a list of
         titles, and shipping every transcript to the window to draw a tab strip
         would be the expensive way to do it.
+
+        The sort is by ``updated_at`` and then by ``created_at``, because two
+        chats made in the same clock tick - which is what a test does, and what a
+        fast double-click does - otherwise come back in whatever order the
+        directory happened to list them, and "newest first" stops being true.
         """
 
         rows: list[dict[str, Any]] = []
@@ -202,7 +207,7 @@ class ConversationStore:
                     "preview": self._preview(messages),
                 }
             )
-        rows.sort(key=lambda row: row["updated_at"], reverse=True)
+        rows.sort(key=lambda row: (row["updated_at"], row["created_at"]), reverse=True)
         return rows
 
     def latest(self) -> dict[str, Any] | None:

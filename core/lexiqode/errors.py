@@ -32,5 +32,15 @@ class ApprovalDenied(ToolError):
     """The user refused the action a tool requested."""
 
 
+class ApprovalUnavailable(LexiQodeError):
+    """Nobody answered an approval request, so the tool never ran.
+
+    Deliberately *not* a :class:`ToolError`: a tool error is a result the model
+    reads and works around, and working around an unanswered prompt means asking
+    again - which is the loop this exists to end. It is raised out of the tool
+    call and ends the turn with the reason stated.
+    """
+
+
 class McpError(LexiQodeError):
     """An MCP server could not be reached or answered incorrectly."""

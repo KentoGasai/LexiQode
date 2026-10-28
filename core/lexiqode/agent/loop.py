@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..config import AgentSettings, ModelProfile
-from ..errors import ProviderError
+from ..errors import ApprovalUnavailable, ProviderError
 from ..llm.openai import OpenAIChatClient
 from ..llm.types import (
     StreamAccumulator,
@@ -124,6 +124,11 @@ class AgentLoop:
         self._min_kept = 4
         #: Whether this turn has already paid for a summary. See :meth:`_compact`.
         self._summarised_this_turn = False
+        #: How many times one identical tool call may be made in a turn before the
+        #: loop decides the model is stuck. See :meth:`_note_repeat`.
+        self._repeat_limit = 3
+        #: Identical calls seen this turn, keyed by tool name and arguments.
+        self._repeats: dict[tuple[str, str], int] = {}
         # Whether the current turn may call tools. Inline edits turn this off so
         # the answer is a single piece of text the editor can insert directly.
         self._tools_enabled = True
@@ -151,6 +156,7 @@ class AgentLoop:
     def run(self, user_text: str, *, tools: bool = True, mode: AgentMode | None = None) -> LoopResult:
         self._cancel.clear()
         self._summarised_this_turn = False
+        self._repeats.clear()
         self._mode = mode or get_mode(None)
         self._tools_enabled = bool(tools) and self.profile.supports_tools and self._mode.tools != ()
         self._history.append(user_message(user_text))
@@ -212,9 +218,22 @@ class AgentLoop:
                     self._history.append(
                         tool_message(call.id or f"call_{call.index}", call.name, outcome)
                     )
+                    if self._note_repeat(call):
+                        result.stopped = "repeated"
+                        result.text = self._last_assistant_text()
+                        break
+                if result.stopped == "repeated":
+                    break
             else:
                 result.stopped = "max_steps"
                 result.text = self._last_assistant_text()
+        except ApprovalUnavailable as exc:
+            # The window never answered, so the tool never ran. Retrying is what
+            # produced a turn of "let me look / looking" until the step budget ran
+            # out, so the turn ends here and the reason is said once.
+            result.stopped = "approval_unavailable"
+            result.text = self._last_assistant_text()
+            self._emit("error", {"message": str(exc), "status": 0})
         except ProviderError as exc:
             result.stopped = "error"
             self._emit("error", {"message": str(exc), "status": exc.status})
@@ -323,6 +342,34 @@ class AgentLoop:
             if message.get("role") == "assistant" and message.get("content"):
                 return str(message["content"])
         return ""
+
+    def _note_repeat(self, call: ToolCall) -> bool:
+        """Notice a call the model has already made, unchanged, too many times.
+
+        The step budget alone ends a loop, but it ends it after forty steps of
+        the same request - which reads as the agent being stuck rather than as a
+        turn that ran out of room. A model that repeats one identical call is not
+        making progress, and the honest thing is to stop and say so.
+
+        Only *identical* calls count: the same tool with the same arguments. A
+        model that reads a file, edits it and reads it again is working, and the
+        arguments differ, so it is not touched. The counter is per turn and is
+        cleared by :meth:`run`.
+        """
+
+        key = (call.name, json.dumps(call.parsed_arguments(), sort_keys=True, ensure_ascii=False))
+        self._repeats[key] = self._repeats.get(key, 0) + 1
+        if self._repeats[key] < self._repeat_limit:
+            return False
+        self._emit(
+            "repeated_call",
+            {
+                "tool": call.name,
+                "arguments": call.parsed_arguments(),
+                "times": self._repeats[key],
+            },
+        )
+        return True
 
     def _system_for(self, mode: AgentMode) -> str:
         cached = self._system_cache.get(mode.id)

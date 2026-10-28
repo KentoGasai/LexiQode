@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ...config import AgentSettings
-from ...errors import ToolError, WorkspaceError
+from ...errors import ApprovalUnavailable, ToolError, WorkspaceError
 from ...llm.types import tool_schema
 
 #: Tool families decide the default approval policy.
@@ -37,6 +37,10 @@ class ApprovalDecision:
     reason: str = ""
     #: When true the caller may remember the decision for this tool family.
     remember: bool = False
+    #: True when nobody answered in time. Kept apart from a refusal because the
+    #: two mean different things to the model: a refusal is a decision to work
+    #: around, a timeout is a broken window and retrying only wastes the turn.
+    timed_out: bool = False
 
 
 ApprovalFn = Callable[[ApprovalRequest], ApprovalDecision]
@@ -159,6 +163,15 @@ class Tool(ABC):
         decision = context.approve(request)
         if not decision.approved:
             reason = decision.reason or "the user declined this action"
+            if decision.timed_out:
+                # A timeout is not a decision, and telling the model it was one is
+                # what produced the "let me look / looking" loop: the model read
+                # "denied" as "not yet", tried the same call again, and each retry
+                # waited out another timeout until the step budget ran out. The
+                # turn is ended here instead, with the reason stated.
+                raise ApprovalUnavailable(
+                    f"the approval prompt for {self.name!r} was never answered: {reason}"
+                )
             raise ToolError(f"denied: {reason}")
         if decision.remember:
             if self.family == FAMILY_WRITE:
@@ -181,6 +194,10 @@ class Tool(ABC):
             result = ToolResult.failure(str(exc), error="tool_error")
         except WorkspaceError as exc:
             result = ToolResult.failure(str(exc), error="workspace_error")
+        except ApprovalUnavailable:
+            # Not a result: an unanswered prompt is a broken window, and the loop
+            # ends the turn on it rather than handing the model something to retry.
+            raise
         except Exception as exc:  # unexpected: report, do not crash the turn
             result = ToolResult.failure(f"{type(exc).__name__}: {exc}", error="internal")
         result.elapsed_ms = int((time.perf_counter() - started) * 1000)

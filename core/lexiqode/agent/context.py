@@ -43,7 +43,16 @@ def _git(workspace: Path, *arguments: str) -> str:
 
 
 def git_state(workspace: Path) -> dict[str, object]:
-    """Branch, HEAD and a count of modified files, when this is a repository."""
+    """Branch, HEAD and a count of modified files, when this is a repository.
+
+    The check is ``exists``, not ``is_dir``, and that is the whole point: in a
+    linked worktree, a submodule or a clone made with ``--separate-git-dir``,
+    ``.git`` is a *file* holding a ``gitdir:`` pointer rather than a directory.
+    Testing for a directory reported every one of those as "not a repository",
+    so the agent was told its workspace had no version control while ``git``
+    itself answered perfectly well - and the source-control panel, which asks
+    git directly, disagreed with the prompt.
+    """
 
     if not (workspace / ".git").exists():
         return {"is_repo": False}

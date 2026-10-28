@@ -659,6 +659,13 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
           }
         })
       );
+    } else if (reason === 'repeated') {
+      node.append(el('span', { text: t('chat.repeatedNotice') }));
+    } else if (reason === 'approval_unavailable') {
+      // The prompt never reached the window, so the tool never ran. Saying so is
+      // the whole point: the turn ended for a reason the user can act on, and
+      // "the agent stopped" would send them looking for a problem in the model.
+      node.append(el('span', { text: t('chat.approvalUnavailable') }));
     } else {
       node.append(el('span', { text: t('chat.stoppedNotice') }));
     }
@@ -693,7 +700,10 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
   }
 
   function approvalCard(payload) {
-    const id = String(payload.request_id || payload.id || '');
+    // `id` is what the core sends; the other two names are accepted because a
+    // reconnecting window rebuilds its cards from `/api/state`, and a card that
+    // cannot be matched to its request is a card whose buttons do nothing.
+    const id = String(payload.request_id || payload.approval_id || payload.id || '');
     if (!id || state.approvals.has(id)) return;
     const what = payload.detail || payload.command || payload.path || payload.summary || 'the agent wants to continue';
     const node = el('div', { class: 'approval' });
@@ -1113,6 +1123,8 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
          */
         if (data.stopped === 'cancelled') stopNotice('cancelled', 0);
         else if (data.stopped === 'max_steps') stopNotice('max_steps', Number(data.steps) || 0);
+        else if (data.stopped === 'repeated') stopNotice('repeated', 0);
+        else if (data.stopped === 'approval_unavailable') stopNotice('approval_unavailable', 0);
         input.focus();
         break;
       }
@@ -1127,8 +1139,18 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
         renderRunning();
         addError(data.message || t('chat.error'));
         break;
+      case 'approval_request':
+        // The core names the request `id`; the panel used to look for
+        // `request_id`/`approval_id`, so the card was never drawn and the tool
+        // waited out its timeout. The event is handled by name now, and the id
+        // is read from the field the core actually sends.
+        approvalCard(data);
+        break;
       default:
-        if (data.request_id || data.approval_id) approvalCard(data);
+        // A request that arrives under a name this window has not been taught
+        // still carries an id, and a card that can be answered is better than a
+        // tool that waits for a timeout. `id` is the field the core sends.
+        if (data.request_id || data.approval_id || data.id) approvalCard(data);
         break;
     }
   }
@@ -1985,7 +2007,7 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
         state.mode = state.modes[0].id;
       }
       if (snapshot.pending_approvals && snapshot.pending_approvals.length) {
-        for (const id of snapshot.pending_approvals) approvalCard({ request_id: id });
+        for (const id of snapshot.pending_approvals) approvalCard({ id });
       }
       renderModes();
       renderContext();

@@ -10,13 +10,53 @@
  * prompt nobody can see, would otherwise hang the panel forever.
  */
 
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
+const fs = require('node:fs');
 const path = require('node:path');
 
 const { parseBranches, parseCommitFiles, parseDiff, parseLog, parseStatus } = require('../shared/git');
 
 const MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 20000;
+
+/**
+ * Where git usually is on Windows, for a window that cannot see it on PATH.
+ *
+ * A GUI application does not inherit the PATH a terminal has. Launched from a
+ * shortcut, Electron gets the PATH recorded in the registry, so a git installed
+ * per-user - or added to PATH by a shell profile - is invisible to it while
+ * `git` works perfectly in the terminal beside it. The panel then reported "this
+ * folder is not a git repository" for a folder that plainly is one, which is the
+ * worst possible answer: it is wrong and it sounds certain.
+ */
+const GIT_CANDIDATES = [
+  'C:\\Program Files\\Git\\cmd\\git.exe',
+  'C:\\Program Files (x86)\\Git\\cmd\\git.exe',
+  'C:\\Program Files\\Git\\bin\\git.exe',
+  'C:\\Program Files (x86)\\Git\\bin\\git.exe'
+];
+
+let cachedGit = null;
+
+/** The git to run: the one on PATH, or one of the usual Windows installs. */
+function findGit() {
+  if (cachedGit) return cachedGit;
+  const override = process.env.LEXIQODE_GIT;
+  const candidates = override ? [override, 'git', ...GIT_CANDIDATES] : ['git', ...GIT_CANDIDATES];
+  for (const candidate of candidates) {
+    // A bare name is left to the OS to resolve; an absolute path is checked
+    // first, because spawning a path that does not exist is a slower way to
+    // learn the same thing.
+    if (candidate.includes(path.sep) && !fs.existsSync(candidate)) continue;
+    const probe = spawnSync(candidate, ['--version'], { encoding: 'utf8', windowsHide: true });
+    if (!probe.error && probe.status === 0) {
+      cachedGit = candidate;
+      return cachedGit;
+    }
+  }
+  cachedGit = 'git';
+  return cachedGit;
+}
 
 class GitService {
   constructor({ workspace }) {
@@ -31,7 +71,7 @@ class GitService {
     return new Promise((resolve) => {
       let child;
       try {
-        child = spawn('git', args, {
+        child = spawn(findGit(), args, {
           cwd,
           windowsHide: true,
           env: {
@@ -43,7 +83,7 @@ class GitService {
           }
         });
       } catch (error) {
-        resolve({ ok: false, code: -1, stdout: '', stderr: error.message });
+        resolve({ ok: false, code: -1, stdout: '', stderr: error.message, missing: true });
         return;
       }
 
@@ -87,8 +127,9 @@ class GitService {
         stderr += chunk;
       });
       child.on('error', (error) => {
-        const message = error.code === 'ENOENT' ? 'git is not installed or not on PATH' : error.message;
-        finish({ ok: false, code: -1, stdout, stderr: message });
+        const missing = error.code === 'ENOENT';
+        const message = missing ? 'git is not installed or not on PATH' : error.message;
+        finish({ ok: false, code: -1, stdout, stderr: message, missing });
       });
       child.on('close', (code) => {
         const ok = code === 0;
@@ -109,7 +150,12 @@ class GitService {
     if (!this.workspace.current()) return { repo: false, reason: 'no folder is open' };
     const result = await this.#git(['rev-parse', '--is-inside-work-tree'], { expectFailure: true });
     if (!result.ok) {
-      const missing = /not installed|not on PATH/.test(result.stderr);
+      // `missing` is set by the spawn failure itself, not guessed from the text
+      // of stderr: a git that could not be started and a git that answered "not
+      // a repository" are different problems, and only one of them is the user's
+      // folder. Reporting the second when the first happened is what made a real
+      // repository look like a plain directory.
+      const missing = Boolean(result.missing);
       return {
         repo: false,
         reason: missing ? 'git is not available' : 'this folder is not a git repository'
@@ -324,4 +370,4 @@ class GitService {
   }
 }
 
-module.exports = { GitService };
+module.exports = { GitService, findGit };

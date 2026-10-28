@@ -227,8 +227,12 @@ class ToolUseTest(LoopTestCase):
 
 class LimitsTest(LoopTestCase):
     def test_step_budget_is_enforced(self) -> None:
+        # Each step asks for a *different* file, so the repeat detector - which
+        # exists to end a stuck turn early - cannot be what ends this one. The
+        # budget is the thing under test, and a script of identical calls would
+        # have measured the detector instead.
         infinite = [
-            tool_chunks("read_file", {"path": "hello.txt"}, call_id=f"call_{index}")
+            tool_chunks("read_file", {"path": f"file{index}.txt"}, call_id=f"call_{index}")
             for index in range(10)
         ]
         loop, _ = self.build(infinite, settings=AgentSettings(auto_approve=True, max_steps=3))
@@ -279,8 +283,12 @@ class LimitsTest(LoopTestCase):
         # Tool calls first and the answer last. A script of tool/text pairs used
         # to end the turn at the first text reply, so the history never reached
         # the ceiling and this test passed without testing the trimming at all.
+        #
+        # Every call names a different file: identical calls would trip the repeat
+        # detector and end the turn before the ceiling was ever reached, which is
+        # the same trap the comment above describes.
         script = [
-            tool_chunks("read_file", {"path": "hello.txt"}, call_id=f"c{index}")
+            tool_chunks("read_file", {"path": f"file{index}.txt"}, call_id=f"c{index}")
             for index in range(12)
         ]
         script.append(text_chunks("done"))
@@ -435,8 +443,10 @@ class ContextCompactionTest(LoopTestCase):
         self.assertNotIn("a" * self.MESSAGE, note)
 
     def test_the_message_ceiling_drops_the_oldest_and_reports_it(self) -> None:
+        # Distinct paths again: the ceiling is what this test is about, and the
+        # repeat detector would otherwise end the turn first.
         script = [
-            tool_chunks("read_file", {"path": "hello.txt"}, call_id=f"c{index}")
+            tool_chunks("read_file", {"path": f"file{index}.txt"}, call_id=f"c{index}")
             for index in range(8)
         ]
         script.append(text_chunks("done"))
@@ -493,6 +503,52 @@ class ContextCompactionTest(LoopTestCase):
         # The summary is the last thing to go: it is what an earlier compaction
         # decided was worth remembering.
         self.assertTrue(loop.messages[0]["content"].startswith(SUMMARY_MARKER))
+
+
+class ApprovalTimeoutTest(LoopTestCase):
+    """An approval nobody answered must end the turn, not be retried.
+
+    The reported symptom was a turn that said "let me look" and "looking" over
+    and over until the step budget ran out. The cause was that a timeout was
+    handed to the model as a refusal, and a refusal reads as "not yet" - so the
+    model asked again, and each retry waited out another timeout.
+    """
+
+    def test_an_unanswered_approval_ends_the_turn(self) -> None:
+        script = [
+            tool_chunks("write_file", {"path": "new.txt", "content": "hi"}, call_id=f"c{index}")
+            for index in range(6)
+        ]
+        loop, _ = self.build(
+            script,
+            settings=AgentSettings(auto_approve=False, approve_writes=True, max_steps=6),
+            approve=lambda _request: ApprovalDecision(
+                approved=False, reason="nobody answered", timed_out=True
+            ),
+        )
+        result = loop.run("create new.txt")
+
+        self.assertEqual(result.stopped, "approval_unavailable")
+        self.assertEqual(result.steps, 1, "the turn must not spend its budget retrying")
+        self.assertFalse((self.workspace / "new.txt").exists())
+        self.assertIn("never answered", self.payload("error")["message"])
+
+    def test_a_refusal_is_still_a_result_the_model_can_work_around(self) -> None:
+        """A refusal is a decision, a timeout is a broken window. Only the second
+        one ends the turn; the first is a result the model answers around."""
+
+        loop, _ = self.build(
+            [
+                tool_chunks("write_file", {"path": "new.txt", "content": "hi"}),
+                text_chunks("Understood, I will not write it."),
+            ],
+            settings=AgentSettings(auto_approve=False, approve_writes=True, max_steps=4),
+            approve=lambda _request: ApprovalDecision(approved=False, reason="keep the tree clean"),
+        )
+        result = loop.run("create new.txt")
+
+        self.assertEqual(result.stopped, "completed")
+        self.assertEqual(result.steps, 2, "the model gets to answer after a refusal")
 
 
 if __name__ == "__main__":

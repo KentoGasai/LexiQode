@@ -23,11 +23,11 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
-const { GitService } = require('../src/main/git-service.js');
+const { GitService, findGit } = require('../src/main/git-service.js');
 
 /** Run git in a folder and return its stdout, failing loudly if it refuses. */
 function git(cwd, args) {
-  return execFileSync('git', args, {
+  return execFileSync(findGit(), args, {
     cwd,
     encoding: 'utf8',
     env: {
@@ -250,4 +250,36 @@ test('the first commit of a repository can be read as a view, though it has no p
   assert.equal(file.ok, true, file.error);
   assert.equal(file.before, '', 'the first commit has no parent, so the before side is empty');
   assert.equal(file.after, 'first\n');
+});
+
+test('git is found even when the window cannot see it on PATH', () => {
+  // A GUI application does not inherit the PATH a terminal has, so a git that
+  // works in the shell beside the window can be invisible to the window. The
+  // panel then said "this folder is not a git repository" about a folder that
+  // plainly is one - wrong, and certain about it.
+  const found = findGit();
+  assert.ok(found, 'a git must be found on a machine that has one');
+  const probe = execFileSync(found, ['--version'], { encoding: 'utf8' });
+  assert.match(probe, /^git version /);
+});
+
+test('a folder that is not a repository says so, and is not confused with a missing git', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lexiqode-plain-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const service = new GitService({ workspace: workspaceFor(root) });
+
+  const detection = await service.detect();
+  assert.equal(detection.repo, false);
+  assert.equal(detection.reason, 'this folder is not a git repository');
+  assert.notEqual(detection.reason, 'git is not available', 'git is installed here');
+});
+
+test('a repository is detected as one', async (t) => {
+  const { work } = makeRepository(t);
+  const service = new GitService({ workspace: workspaceFor(work) });
+
+  const detection = await service.detect();
+  assert.equal(detection.repo, true, detection.reason);
+  assert.equal(detection.reason, '');
+  assert.equal(path.resolve(detection.topLevel), path.resolve(work));
 });

@@ -58,7 +58,11 @@ class ApprovalBroker:
         except queue.Empty:
             return ApprovalDecision(
                 approved=False,
-                reason="the editor did not answer the approval request in time",
+                reason=(
+                    "the editor did not answer the approval request in time; "
+                    "this is a timeout, not a refusal - do not retry the same call"
+                ),
+                timed_out=True,
             )
         finally:
             with self._lock:
