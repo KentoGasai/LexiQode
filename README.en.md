@@ -262,15 +262,6 @@ sources**, so an edit is visible without building anything; `-Bundle` starts the
 staged folder instead, and `-Deploy` copies it into
 `%LOCALAPPDATA%\Programs\LexiQode` and starts it from there.
 
-Publishing a build is a matter of attaching the archive to a GitHub release:
-
-```powershell
-gh release create v0.2.0 `
-  dist\LexiQode-0.2.0-win32-x64.zip `
-  dist\LexiQode-0.2.0-win32-x64.zip.sha256 `
-  --title "LexiQode 0.2.0" --notes-file docs\release-notes\v0.2.0.md
-```
-
 ## Tests
 
 ```powershell

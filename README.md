@@ -259,15 +259,6 @@ powershell -ExecutionPolicy Bypass -File scripts\build-app.ps1
 `scripts\run-app.ps1 -Bundle`, а `-Deploy` кладёт её в `%LOCALAPPDATA%\Programs\LexiQode`
 и запускает уже оттуда.
 
-Публикация сборки — обычным прикреплением архива к релизу GitHub:
-
-```powershell
-gh release create v0.2.0 `
-  dist\LexiQode-0.2.0-win32-x64.zip `
-  dist\LexiQode-0.2.0-win32-x64.zip.sha256 `
-  --title "LexiQode 0.2.0" --notes-file docs\release-notes\v0.2.0.md
-```
-
 ## Тесты
 
 ```powershell
