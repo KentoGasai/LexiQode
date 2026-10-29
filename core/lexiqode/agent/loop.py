@@ -7,11 +7,14 @@ SSE stream, a terminal REPL and a unit test without changes.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
+
+import httpx
 
 from ..config import AgentSettings, ModelProfile
 from ..errors import ApprovalUnavailable, ProviderError
@@ -103,6 +106,28 @@ PROMISE_MAX_CHARS = 200
 #: after being told is not going to act, and the turn should end rather than
 #: spend its whole budget on promises.
 PROMISE_NUDGE_LIMIT = 2
+
+#: Marker on the message that tells the model its completion carried neither text
+#: nor a tool call, so the turn had nothing to go on.
+EMPTY_MARKER = "[stopped: empty answer]"
+
+#: Marker on the message that tells the model the output limit cut its answer
+#: off before the sentence was finished.
+TRUNCATED_MARKER = "[stopped: output limit]"
+
+#: How many identical calls may come back with an identical result in one turn
+#: before the loop decides nothing is changing. See :meth:`_note_repeat`.
+NO_PROGRESS_LIMIT = 3
+
+#: How many times one turn may be nudged for answering with nothing. Two,
+#: because an empty completion can be a provider hiccup; a third is a model that
+#: is not going to answer, and asking again only spends the budget.
+EMPTY_NUDGE_LIMIT = 2
+
+#: How many times one turn may be nudged for an answer cut off at the output
+#: limit. One: the model cannot give itself more room, so a second nudge would
+#: ask for something it cannot do.
+TRUNCATED_NUDGE_LIMIT = 1
 
 #: Characters per token used by :func:`estimate_tokens`. English prose runs near
 #: four; code and Cyrillic are denser, so the estimate deliberately errs low and
@@ -242,6 +267,13 @@ class AgentLoop:
         self._repeat_episode_limit = 4
         #: Identical calls seen this turn, keyed by tool name and arguments.
         self._repeats: dict[tuple[str, str], int] = {}
+        #: Calls that came back with the same result, keyed by tool name and
+        #: arguments: ``(digest of the result, how many times in a row)``. A
+        #: different result resets the count, because a result that moves is
+        #: progress however often the call is made. See :meth:`_note_repeat`.
+        self._no_progress: dict[tuple[str, str], tuple[str, int]] = {}
+        #: How many times the same call may return the same result in one turn.
+        self._no_progress_limit = NO_PROGRESS_LIMIT
         # Whether the current turn may call tools. Inline edits turn this off so
         # the answer is a single piece of text the editor can insert directly.
         self._tools_enabled = True
@@ -270,6 +302,7 @@ class AgentLoop:
         self._cancel.clear()
         self._summarised_this_turn = False
         self._repeats.clear()
+        self._no_progress.clear()
         self._mode = mode or get_mode(None)
         self._tools_enabled = bool(tools) and self.profile.supports_tools and self._mode.tools != ()
         self._history.append(user_message(user_text))
@@ -306,6 +339,12 @@ class AgentLoop:
         #: to act, and the turn should end rather than spend its budget on
         #: announcements.
         promise_nudges = 0
+        #: How many times this turn has been nudged for a completion that carried
+        #: no text at all. Bounded for the same reason as the others.
+        empty_nudges = 0
+        #: How many times this turn has been nudged for an answer the output limit
+        #: cut off before it was finished.
+        truncated_nudges = 0
         try:
             for step in range(1, budget + 1):
                 if self._cancel.is_set():
@@ -338,14 +377,66 @@ class AgentLoop:
                     break
 
                 calls = accumulator.tool_calls
+                truncated = accumulator.finish_reason == "length"
                 if not calls:
                     # A message with no tool calls is normally the answer, and the
-                    # turn ends here. But a message that only *announces* work is
-                    # not an answer: the model said what it was about to do and
-                    # stopped before doing it, and the user is left with a turn
-                    # that looks like progress and produced nothing. Telling the
-                    # model so is the whole fix - it cannot correct what it does
-                    # not know it did.
+                    # turn ends here. Three shapes are not answers, and every one
+                    # of them used to end the turn in silence - which is exactly
+                    # how "the agent stands still, calls nothing and stops" was
+                    # reported, with nothing on screen to say why:
+                    #
+                    # * a completion that carries no text at all;
+                    # * an answer the output limit cut off mid-sentence;
+                    # * a message that only *announces* work ("Работаю").
+                    #
+                    # The first is a provider hiccup or a model that spent its
+                    # whole output budget on its own reasoning, so it gets bounded
+                    # retries and then an ending the reader can see. The second is
+                    # named for what it is, because the fix for it is a setting -
+                    # the output limit - rather than another attempt. Telling the
+                    # model is the whole fix for the third: it cannot correct what
+                    # it does not know it did.
+                    if truncated:
+                        self._emit(
+                            "answer_truncated",
+                            {
+                                "finish_reason": "length",
+                                "chars": len(text),
+                                "reasoning_chars": len(accumulator.reasoning),
+                            },
+                        )
+                        if text and truncated_nudges < TRUNCATED_NUDGE_LIMIT:
+                            truncated_nudges += 1
+                            self._history.append(user_message(self._truncated_notice(text)))
+                            continue
+                    if not text:
+                        if empty_nudges < EMPTY_NUDGE_LIMIT:
+                            empty_nudges += 1
+                            self._history.append(user_message(self._empty_notice(truncated)))
+                            self._emit(
+                                "empty_answer_retry",
+                                {
+                                    "finish_reason": accumulator.finish_reason or "",
+                                    "reasoning_chars": len(accumulator.reasoning),
+                                },
+                            )
+                            continue
+                        # The turn produced nothing and has nothing left to hide
+                        # behind: it ends, and the reason is published so the
+                        # window can say it instead of showing a turn that simply
+                        # stopped.
+                        result.stopped = "truncated_answer" if truncated else "empty_answer"
+                        result.text = ""
+                        self._emit(
+                            "empty_answer",
+                            {
+                                "finish_reason": accumulator.finish_reason or "",
+                                "reasoning_chars": len(accumulator.reasoning),
+                                "steps": step,
+                                "truncated": truncated,
+                            },
+                        )
+                        break
                     if looks_like_promise(text) and promise_nudges < PROMISE_NUDGE_LIMIT:
                         promise_nudges += 1
                         self._history.append(user_message(self._promise_notice(text)))
@@ -360,23 +451,26 @@ class AgentLoop:
                     self._history.append(
                         tool_message(call.id or f"call_{call.index}", call.name, outcome)
                     )
-                    if self._note_repeat(call):
+                    stuck = self._note_repeat(call, outcome)
+                    if stuck:
+                        reason, times = stuck
                         # The model is stuck. Telling it so in the history is the
                         # whole point: the stop notice is drawn in the window, and
                         # a model that never sees it has no reason to change what
                         # it is doing - which is why the same turn was reported
                         # stuck again and again.
                         self._history.append(
-                            user_message(self._repeat_notice(call))
+                            user_message(self._repeat_notice(call, reason=reason, times=times))
                         )
                         if repeat_episodes < self._repeat_episode_limit:
                             repeat_episodes += 1
-                            self._emit("repeat_retry", {"tool": call.name})
+                            self._emit("repeat_retry", {"tool": call.name, "reason": reason})
                             # The counter is cleared so the retry is judged on its
                             # own: the model has been told, and one more identical
                             # call after that is a genuine second failure rather
                             # than the same one counted twice.
                             self._repeats.clear()
+                            self._no_progress.clear()
                             break
                         result.stopped = "repeated"
                         result.text = self._last_assistant_text()
@@ -435,17 +529,25 @@ class AgentLoop:
         payload = [{"role": "system", "content": self._system_for(self._mode)}, *self._history]
         tool_schemas = self.registry.schemas(self._mode.tools) if self._tools_enabled else None
 
-        for chunk in self._client.stream(payload, tool_schemas):
-            if self._cancel.is_set():
-                break
-            accumulator.feed(chunk)
-            for call in chunk.tool_calls:
-                if call.name:
-                    self._emit("tool_call_delta", {"index": call.index, "name": call.name})
-            if chunk.text:
-                self._emit("text_delta", {"text": chunk.text})
-            if chunk.reasoning:
-                self._emit("reasoning_delta", {"text": chunk.reasoning})
+        try:
+            for chunk in self._client.stream(payload, tool_schemas):
+                if self._cancel.is_set():
+                    break
+                accumulator.feed(chunk)
+                for call in chunk.tool_calls:
+                    if call.name:
+                        self._emit("tool_call_delta", {"index": call.index, "name": call.name})
+                if chunk.text:
+                    self._emit("text_delta", {"text": chunk.text})
+                if chunk.reasoning:
+                    self._emit("reasoning_delta", {"text": chunk.reasoning})
+        except httpx.HTTPError as exc:
+            # The last line of defence. The client converts transport errors of its
+            # own, but the loop must not end a turn by raising: an exception that
+            # escapes here reaches the server, the turn produces no `turn_end` and
+            # the window shows a chat that stopped for no stated reason. A transport
+            # error is a provider failure, and it is reported as one.
+            raise ProviderError(f"the response stream ended early: {exc}") from exc
         return accumulator
 
     def _run_tool(self, call: ToolCall) -> str:
@@ -524,42 +626,97 @@ class AgentLoop:
             "instead of announcing that you are working."
         )
 
-    def _repeat_notice(self, call: ToolCall) -> str:
+    def _empty_notice(self, truncated: bool) -> str:
+        """What the model is told when its completion carried nothing.
+
+        There is nothing to quote back, so the notice says what was missing and
+        what is expected instead. The truncated case names the output limit,
+        because the model can answer in fewer words and cannot give itself more.
+        """
+
+        missing = (
+            "Your last response was cut off by the output limit before any answer "
+            "or tool call began - your own reasoning used the whole output budget."
+            if truncated
+            else "Your last response contained no text and no tool call."
+        )
+        return (
+            f"{EMPTY_MARKER} {missing}\n"
+            "The turn cannot continue without one of the two. Make the tool call "
+            "you need now, or write the answer, even if it is short and plain. If "
+            "the request cannot be done, say what is blocking it."
+        )
+
+    def _truncated_notice(self, text: str) -> str:
+        """What the model is told when the output limit cut its answer short."""
+
+        quoted = text.strip()
+        if len(quoted) > 200:
+            quoted = quoted[:200] + "…"
+        return (
+            f"{TRUNCATED_MARKER} Your last message was cut off by the output limit "
+            f"before it was finished: {quoted!r}\n"
+            "Answer again, briefly: say only what is needed, or make the tool call "
+            "instead of describing it. Do not repeat the whole plan."
+        )
+
+    def _repeat_notice(self, call: ToolCall, *, reason: str, times: int) -> str:
         """What the model is told when it has repeated one call too many times.
 
         Written as a user message because that is the role the model treats as
         instruction, and phrased as a fact about the turn rather than a scolding:
         the call it just made is the one that was repeated, and the way forward is
-        to change the approach rather than to make the same call again.
+        to change the approach rather than to make the same call again. When the
+        result has not changed, that is what the model is told, because it explains
+        why repeating cannot help: whatever it changed is not reaching this call.
         """
 
         arguments = json.dumps(call.parsed_arguments(), ensure_ascii=False, sort_keys=True)
         if len(arguments) > 400:
             arguments = arguments[:400] + "…"
+        because = (
+            "The call repeated with nothing in between."
+            if reason == "consecutive"
+            else (
+                f"Its result has not changed in {self._no_progress_limit} runs in this "
+                "turn, so nothing you have changed is reaching it."
+            )
+        )
         return (
             f"{REPEAT_MARKER} You have called {call.name} with the same arguments "
-            f"{self._repeat_limit} times in this turn: {arguments}\n"
-            "The result was the same every time, so calling it again will not help. "
+            f"{times} times in this turn: {arguments}\n"
+            f"{because} Calling it again will not help. "
             "Change the approach: use different arguments, use another tool, or stop "
             "and say what is blocking you. Do not repeat this call."
         )
 
-    def _note_repeat(self, call: ToolCall) -> bool:
-        """Notice a call the model has already made, unchanged, too many times.
+    def _note_repeat(self, call: ToolCall, outcome: str) -> tuple[str, int] | None:
+        """Notice that a call is not getting anywhere, and say which shape it is.
 
         The step budget alone ends a loop, but it ends it after forty steps of
         the same request - which reads as the agent being stuck rather than as a
         turn that ran out of room. A model that repeats one identical call is not
         making progress, and the honest thing is to stop and say so.
 
-        Only *consecutive* identical calls count. A turn that runs the tests,
-        edits a file and runs the tests again is working, and that is the normal
-        rhythm of a fix - counting those as repeats stopped turns that were
-        making progress, which is worse than not detecting the loop at all. So
-        any call that is not the repeated one clears the count: the model did
-        something else, and the next identical call starts a fresh chain.
+        Two shapes are stuck, and only one of them was noticed.
+
+        The first is the same call three times in a row. Anything else in between
+        breaks that chain, and that is deliberate: a turn that runs the tests,
+        edits a file and runs the tests again is working, and counting those as
+        repeats stopped turns that were making progress.
+
+        The narrowing left the second shape unguarded, and it is the one the stored
+        transcripts show: the same call returning the *same result* with unrelated
+        work in between. Nothing in such a turn ever makes three identical calls in
+        a row, so no count was ever reached - one command ran twenty-three times in
+        a single turn and the guard never fired once. What makes that a loop is not
+        the repetition but the absence of progress, so that is what is measured:
+        the same call, the same result. A result that changes resets the count,
+        because a result that changes is progress.
 
         The counter is per turn and is cleared by :meth:`run`.
+
+        Returns the reason and the count when the model is stuck, else ``None``.
         """
 
         key = (call.name, json.dumps(call.parsed_arguments(), sort_keys=True, ensure_ascii=False))
@@ -569,17 +726,30 @@ class AgentLoop:
             if other != key:
                 del self._repeats[other]
         self._repeats[key] = self._repeats.get(key, 0) + 1
-        if self._repeats[key] < self._repeat_limit:
-            return False
+
+        # Hashed rather than kept: a result is up to thousands of characters, and
+        # only its identity matters here.
+        digest = hashlib.sha1(outcome.encode("utf-8", "replace")).hexdigest()
+        previous, count = self._no_progress.get(key, ("", 0))
+        count = count + 1 if previous == digest else 1
+        self._no_progress[key] = (digest, count)
+
+        if self._repeats[key] >= self._repeat_limit:
+            reason, times = "consecutive", self._repeats[key]
+        elif count >= self._no_progress_limit:
+            reason, times = "no-progress", count
+        else:
+            return None
         self._emit(
             "repeated_call",
             {
                 "tool": call.name,
                 "arguments": call.parsed_arguments(),
-                "times": self._repeats[key],
+                "times": times,
+                "reason": reason,
             },
         )
-        return True
+        return reason, times
 
     def _system_for(self, mode: AgentMode) -> str:
         cached = self._system_cache.get(mode.id)

@@ -1,10 +1,16 @@
-"""A repeated call is only a sign of being stuck if nothing happened in between.
+"""A repeated call is only a sign of being stuck if its result never changes.
 
-The detector counts identical calls. But a real turn often runs the same command
-more than once with work in between - run the tests, fix the failure, run the
-tests again - and that is progress, not a loop. Counting those as repeats stops
-turns that were working, which is what the user saw: the agent was stopped for
-"repeating" while it was in fact editing files between runs.
+A real turn often makes the same call more than once with work in between - run
+the tests, fix the failure, run the tests again - and that is progress, not a loop.
+Counting those as repeats stopped turns that were working, which is what the user
+saw: the agent was stopped for "repeating" while it was in fact editing files
+between runs.
+
+The rule that answers both is about the *result*, not the call: a repeat whose
+result moves is work, a repeat whose result is identical is a loop. These tests use
+``read_file`` rather than a shell command, because a file's content is the result
+and can be changed by the same turn - which is exactly the difference being
+measured, with nothing depending on what a shell does on the machine running them.
 """
 
 from __future__ import annotations
@@ -50,22 +56,22 @@ class RepeatWithWorkTest(unittest.TestCase):
         return [event_type for event_type, _ in self.events]
 
     def test_the_same_command_after_an_edit_is_not_a_repeat(self) -> None:
-        """Run tests, edit, run tests again: that is the normal working rhythm."""
+        """Read, edit, read again: the same call whose result moves is work."""
 
         script = [
-            tool_chunks("run_command", {"command": "pytest -q"}, call_id="c1"),
-            tool_chunks("write_file", {"path": "fix.py", "content": "x = 1\n"}, call_id="c2"),
-            tool_chunks("run_command", {"command": "pytest -q"}, call_id="c3"),
-            tool_chunks("write_file", {"path": "fix.py", "content": "x = 2\n"}, call_id="c4"),
-            tool_chunks("run_command", {"command": "pytest -q"}, call_id="c5"),
-            text_chunks("The tests pass now."),
+            tool_chunks("read_file", {"path": "hello.txt"}, call_id="c1"),
+            tool_chunks("edit_file", {"path": "hello.txt", "old_text": "line two", "new_text": "line 2"}, call_id="c2"),
+            tool_chunks("read_file", {"path": "hello.txt"}, call_id="c3"),
+            tool_chunks("edit_file", {"path": "hello.txt", "old_text": "line one", "new_text": "line 1"}, call_id="c4"),
+            tool_chunks("read_file", {"path": "hello.txt"}, call_id="c5"),
+            text_chunks("The file reads as intended now."),
         ]
         loop, _ = self.build(script)
-        result = loop.run("fix the failing test")
+        result = loop.run("fix the wording in hello.txt")
 
-        self.assertEqual(result.stopped, "completed", "work between runs is not a loop")
+        self.assertEqual(result.stopped, "completed", "a result that moves is not a loop")
         self.assertNotIn("repeat_retry", self.types())
-        self.assertIn("The tests pass now.", result.text)
+        self.assertIn("The file reads as intended now.", result.text)
 
     def test_three_identical_calls_in_a_row_are_still_a_repeat(self) -> None:
         """The detector must keep working when nothing happens in between."""
@@ -81,14 +87,19 @@ class RepeatWithWorkTest(unittest.TestCase):
         self.assertIn("repeat_retry", self.types())
 
     def test_a_read_between_identical_reads_breaks_the_chain(self) -> None:
-        """Reading a different file is progress, even if the first read repeats."""
+        """Two identical reads separated by other work are not yet a loop.
+
+        The count is three, not two: doing something else in between is a sign the
+        model is looking around rather than stuck, and the third identical result -
+        with nothing new in it - is what says it is not getting anywhere. The
+        interleaved call is `list_dir`, whose result differs from the read's, so it
+        neither resets this call's count nor trips it.
+        """
 
         script = [
             tool_chunks("read_file", {"path": "hello.txt"}, call_id="c1"),
-            tool_chunks("read_file", {"path": "hello.txt"}, call_id="c2"),
-            tool_chunks("list_dir", {"path": "."}, call_id="c3"),
-            tool_chunks("read_file", {"path": "hello.txt"}, call_id="c4"),
-            tool_chunks("read_file", {"path": "hello.txt"}, call_id="c5"),
+            tool_chunks("list_dir", {"path": "."}, call_id="c2"),
+            tool_chunks("read_file", {"path": "hello.txt"}, call_id="c3"),
             text_chunks("Done."),
         ]
         loop, _ = self.build(script)

@@ -100,14 +100,26 @@ function stub() {
            * list could not be read to its end: the expanded rows pushed the rest
            * of the turn out of the panel's reach. One call would never show that,
            * so the stub makes a step that fills the list.
+           *
+           * The pattern differs per step, and that is not decoration. The stub used
+           * to send the same twelve calls with the same `*.md` listing on every
+           * step, which is the shape the core now correctly stops as a loop - the
+           * same call returning the same result three times in one turn. This probe
+           * is about drawing a long list, not about loops, so its steps have to make
+           * progress: a different listing each time, and the guard stays out of the
+           * way of what is being measured.
            */
+          const patterns = ['*.md', '*.json', '*.cjs', '*.txt'];
           const calls = Array.from({ length: 12 }, (_, index) => ({
             index,
             id: 'call_probe_' + (index + 1),
             type: 'function',
             function: {
               name: 'glob',
-              arguments: JSON.stringify({ pattern: '*.md', note: 'probe row ' + (index + 1) })
+              arguments: JSON.stringify({
+                pattern: patterns[assistantTurns % patterns.length],
+                note: 'probe row ' + (index + 1)
+              })
             }
           }));
           response.write(

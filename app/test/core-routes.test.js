@@ -134,6 +134,26 @@ test('a promise without action is announced, not silent', () => {
   assert.match(chat, /chat\.promiseNudge/, 'the panel must say what is happening');
 });
 
+test('an empty or cut-off answer is announced, not silent', () => {
+  // Both shapes used to end the turn as though the model had answered, and the
+  // window showed a chat that simply stopped. The core now publishes the reason,
+  // so the window has to carry it: an event list that drops it and a switch that
+  // does not know it are the same silence with more code.
+  const service = fs.readFileSync(path.join(AGENT, 'service.js'), 'utf8');
+  const chat = fs.readFileSync(
+    path.join(APP, 'src', 'renderer', 'js', 'chat.js'),
+    'utf8'
+  );
+  for (const event of ['empty_answer_retry', 'answer_truncated', 'empty_answer']) {
+    assert.match(service, new RegExp(`'${event}'`), `the main process must forward ${event}`);
+    assert.match(chat, new RegExp(`'${event}'`), `the panel must know ${event}`);
+  }
+  assert.match(chat, /chat\.emptyRetry/, 'the retry must be said out loud');
+  assert.match(chat, /chat\.answerTruncated/, 'a cut-off answer is news the reader needs');
+  assert.match(chat, /chat\.emptyAnswerNotice/, 'the ending must say what happened');
+  assert.match(chat, /chat\.truncatedAnswerNotice/, 'and name the output limit');
+});
+
 test('the command a call ran is shown whole, not only as a clipped summary', () => {
   // The row's one-line summary clips at 120 characters. A command is the one
   // argument where the end matters as much as the beginning, so the opened row

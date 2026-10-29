@@ -683,6 +683,13 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
       );
     } else if (reason === 'repeated') {
       node.append(el('span', { text: t('chat.repeatedNotice') }));
+    } else if (reason === 'empty_answer') {
+      // An empty completion used to end the turn as though it were an answer, so
+      // the window showed a turn that simply stopped and the reader had nothing to
+      // go on. The reason is the whole fix for that.
+      node.append(el('span', { text: t('chat.emptyAnswerNotice') }));
+    } else if (reason === 'truncated_answer') {
+      node.append(el('span', { text: t('chat.truncatedAnswerNotice') }));
     } else if (reason === 'approval_unavailable') {
       // The prompt never reached the window, so the tool never ran. Saying so is
       // the whole point: the turn ended for a reason the user can act on, and
@@ -1228,6 +1235,8 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
         if (data.stopped === 'cancelled') stopNotice('cancelled', 0);
         else if (data.stopped === 'max_steps') stopNotice('max_steps', Number(data.steps) || 0);
         else if (data.stopped === 'repeated') stopNotice('repeated', 0);
+        else if (data.stopped === 'empty_answer') stopNotice('empty_answer', 0);
+        else if (data.stopped === 'truncated_answer') stopNotice('truncated_answer', 0);
         else if (data.stopped === 'approval_unavailable') stopNotice('approval_unavailable', 0);
         input.focus();
         break;
@@ -1268,6 +1277,16 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
         // already in the transcript and looks like progress, so the notice is
         // what tells the reader that nothing happened yet.
         addNotice(t('chat.promiseNudge'));
+        break;
+      case 'empty_answer_retry':
+        // The completion carried nothing at all, which used to end the turn in
+        // silence - the shape reported as "the chat stands still and stops".
+        addNotice(t('chat.emptyRetry'));
+        break;
+      case 'answer_truncated':
+        // The answer was cut off at the output limit. Nobody can raise that limit
+        // except the reader, so they are told while the turn is still running.
+        addNotice(t('chat.answerTruncated'));
         break;
       default:
         // A request that arrives under a name this window has not been taught

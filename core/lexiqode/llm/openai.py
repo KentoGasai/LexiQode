@@ -153,6 +153,12 @@ class OpenAIChatClient:
                 chunk = self.decode_line(line)
                 if chunk is not None:
                     yield chunk
+        except httpx.HTTPError as exc:
+            # A stream that dies mid-answer is not an answer. Left uncaught it
+            # escaped the agent loop entirely, so the turn ended with no event and
+            # nothing on screen - which is how "the chat simply stops" happens. It
+            # is reported as a provider failure so `run` can say what happened.
+            raise ProviderError(f"the response stream ended early: {exc}") from exc
         finally:
             response.close()
 

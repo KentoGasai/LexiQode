@@ -37,6 +37,15 @@ const EVENT_TYPES = [
   // more chance. The panel says so, because a turn that is quietly retrying looks
   // exactly like a turn that is stuck.
   'repeat_retry',
+  // The completion carried no text and no tool call, which used to end the turn in
+  // silence: the window showed a chat that had stopped for no stated reason.
+  'empty_answer_retry',
+  // The answer was cut off at the output limit. Only the reader can raise that
+  // limit, so the news has to reach them while the turn is still running.
+  'answer_truncated',
+  // The turn ended because the model answered with nothing, twice. The reason is
+  // what turns "nothing happened" into something the reader can act on.
+  'empty_answer',
   // The core noticed the agent announcing work instead of doing it, told it so,
   // and is giving it one more chance. Without this the user sees a message that
   // looks like progress and a turn that produced nothing.
