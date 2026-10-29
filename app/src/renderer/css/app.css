@@ -1508,6 +1508,20 @@ kbd {
 }
 
 /*
+ * The command a run_command call ran, shown whole.
+ *
+ * Taller and brighter than the other blocks: it is the thing the reader opened
+ * the row to see, and a command is read line by line rather than skimmed. The
+ * height is capped so a long script cannot push the rest of the turn away, and
+ * the block scrolls instead.
+ */
+.toolrow__pre--command {
+  max-height: 320px;
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+/*
  * The files a turn changed, as a block of its own in the transcript.
  *
  * It is not inside the action group on purpose: the actions are a log of what

@@ -91,4 +91,21 @@ export function formatTokens(value) {
   return String(number).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 }
 
+/**
+ * The command a `run_command` call is about to run, whole and unclipped.
+ *
+ * The one-line summary clips at 120 characters, which is right for a row and
+ * wrong for the thing the reader opened the row to see: a command is the one
+ * argument where the end matters as much as the beginning, and a truncated
+ * command is a command that cannot be checked or copied. Returns an empty string
+ * for every other tool, so the caller renders nothing rather than an empty box.
+ */
+export function commandOf(name, args) {
+  if (String(name) !== 'run_command') return '';
+  if (typeof args === 'string') return args.trim();
+  if (!args || typeof args !== 'object') return '';
+  const command = args.command;
+  return typeof command === 'string' ? command.trim() : '';
+}
+
 export { BULKY, PRIMARY };

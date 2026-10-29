@@ -81,3 +81,40 @@ test('tool call summaries', async (t) => {
     assert.equal(formatTokens(1234.6), '1 235');
   });
 });
+
+test('the command a call ran, whole', async (t) => {
+  const { commandOf, describeArguments } = await import(MODULE);
+
+  await t.test('a command is returned unclipped, unlike the one-line summary', () => {
+    // The summary clips at 120 characters, which is right for a row and wrong
+    // for the thing the reader opened the row to see: a truncated command cannot
+    // be checked and cannot be copied.
+    const command = `cd core && python -m pytest tests -q ${'--verbose '.repeat(30)}`.trim();
+    assert.ok(command.length > 120, 'the fixture must be longer than the summary limit');
+    assert.equal(commandOf('run_command', { command }), command);
+    assert.ok(describeArguments('run_command', { command }).length <= 120);
+  });
+
+  await t.test('a multi-line command keeps its lines', () => {
+    const command = 'cd core\npython -m pytest tests -q\ncd ..';
+    assert.equal(commandOf('run_command', { command }), command);
+  });
+
+  await t.test('every other tool has no command', () => {
+    assert.equal(commandOf('read_file', { path: 'a.txt' }), '');
+    assert.equal(commandOf('write_file', { path: 'a.txt', content: 'x' }), '');
+    assert.equal(commandOf('grep', { pattern: 'x' }), '');
+  });
+
+  await t.test('a missing or malformed command is empty, not "undefined"', () => {
+    assert.equal(commandOf('run_command', {}), '');
+    assert.equal(commandOf('run_command', null), '');
+    assert.equal(commandOf('run_command', undefined), '');
+    assert.equal(commandOf('run_command', { command: 42 }), '');
+    assert.equal(commandOf('run_command', { command: '   ' }), '');
+  });
+
+  await t.test('a command sent as a bare string is still a command', () => {
+    assert.equal(commandOf('run_command', 'ls -la'), 'ls -la');
+  });
+});

@@ -46,6 +46,64 @@ SUMMARY_MARKER = "[context summary]"
 #: it as the reason its last call was not the way forward.
 REPEAT_MARKER = "[stopped: repeated call]"
 
+#: Marker on the message that tells the model a promise is not an answer. The
+#: panel recognises it and draws a notice, and the model reads it as the reason
+#: its last message did not end the turn.
+PROMISE_MARKER = "[not an answer: promised work]"
+
+#: Phrases that announce work instead of doing it. A model that writes one of
+#: these and calls no tool has not answered: it has said what it is about to do,
+#: and the turn ended before it did it. Matched case-insensitively against the
+#: whole message, which must also be short - a long answer that happens to
+#: contain "let me" is an answer, not a promise.
+PROMISE_PHRASES: tuple[str, ...] = (
+    "работаю",
+    "приступаю",
+    "начинаю",
+    "сейчас сделаю",
+    "сейчас посмотрю",
+    "сейчас проверю",
+    "сейчас исправлю",
+    "сейчас найду",
+    "сейчас прочитаю",
+    "сейчас запущу",
+    "сейчас выполню",
+    "сейчас займусь",
+    "займусь этим",
+    "берусь за",
+    "продолжаю работу",
+    "выполняю",
+    "проверяю",
+    "ищу",
+    "анализирую",
+    "изучаю",
+    "working on it",
+    "working on that",
+    "let me",
+    "i'll",
+    "i will",
+    "i'm going to",
+    "i am going to",
+    "starting now",
+    "on it",
+    "looking into",
+    "checking",
+    "investigating",
+    "analyzing",
+    "analysing",
+)
+
+#: How long a message may be and still count as a bare promise. A promise is a
+#: sentence; an answer is usually more, and a long message that merely contains
+#: "let me" somewhere is an answer that happens to mention it.
+PROMISE_MAX_CHARS = 200
+
+#: How many times one turn may be nudged for promising without acting. One is
+#: enough to correct a model that meant to work; a model that promises again
+#: after being told is not going to act, and the turn should end rather than
+#: spend its whole budget on promises.
+PROMISE_NUDGE_LIMIT = 2
+
 #: Characters per token used by :func:`estimate_tokens`. English prose runs near
 #: four; code and Cyrillic are denser, so the estimate deliberately errs low and
 #: the room is spent earlier rather than later.
@@ -91,6 +149,40 @@ class LoopResult:
 
 def _auto_approve(_request: ApprovalRequest) -> ApprovalDecision:
     return ApprovalDecision(approved=True, reason="auto-approved")
+
+
+def looks_like_promise(text: str) -> bool:
+    """Whether a message announces work instead of doing it.
+
+    A model that writes "Работаю" and calls no tool has not answered the user: it
+    has said what it is about to do, and the turn ended before it did it. The
+    user sees a message that looks like progress and a turn that produced
+    nothing, which is worse than an error - an error at least says something
+    went wrong.
+
+    The test is deliberately narrow. It fires only on a *short* message that is
+    essentially one of the phrases, because a long answer that happens to contain
+    "let me" is an answer, and treating it as a promise would keep a finished
+    turn running.
+    """
+
+    stripped = (text or "").strip()
+    if not stripped or len(stripped) > PROMISE_MAX_CHARS:
+        return False
+    # Trailing punctuation and whitespace are not part of the phrase.
+    lowered = stripped.lower().strip(" \t\r\n.!…,;:-—")
+    if not lowered:
+        return False
+    for phrase in PROMISE_PHRASES:
+        if lowered == phrase:
+            return True
+        # "Работаю над этим." and "Let me check the file." are the same promise
+        # with a few more words; the phrase has to be at the start, and the rest
+        # has to be short enough to still be an announcement rather than an
+        # answer that begins with it.
+        if lowered.startswith(phrase) and len(lowered) <= len(phrase) + 60:
+            return True
+    return False
 
 
 class AgentLoop:
@@ -209,6 +301,11 @@ class AgentLoop:
         #: bound: it is a budget the turn spends, and it is set high enough that a
         #: turn which genuinely recovers a few times is not cut short.
         repeat_episodes = 0
+        #: How many times this turn has been nudged for promising work without
+        #: doing it. Bounded, because a model that only ever promises is not going
+        #: to act, and the turn should end rather than spend its budget on
+        #: announcements.
+        promise_nudges = 0
         try:
             for step in range(1, budget + 1):
                 if self._cancel.is_set():
@@ -242,6 +339,18 @@ class AgentLoop:
 
                 calls = accumulator.tool_calls
                 if not calls:
+                    # A message with no tool calls is normally the answer, and the
+                    # turn ends here. But a message that only *announces* work is
+                    # not an answer: the model said what it was about to do and
+                    # stopped before doing it, and the user is left with a turn
+                    # that looks like progress and produced nothing. Telling the
+                    # model so is the whole fix - it cannot correct what it does
+                    # not know it did.
+                    if looks_like_promise(text) and promise_nudges < PROMISE_NUDGE_LIMIT:
+                        promise_nudges += 1
+                        self._history.append(user_message(self._promise_notice(text)))
+                        self._emit("promise_nudge", {"text": text})
+                        continue
                     result.text = text
                     break
 
@@ -393,6 +502,27 @@ class AgentLoop:
             if message.get("role") == "assistant" and message.get("content"):
                 return str(message["content"])
         return ""
+
+    def _promise_notice(self, text: str) -> str:
+        """What the model is told when it announced work instead of doing it.
+
+        Written as a user message because that is the role the model treats as
+        instruction, and phrased as a fact about the turn rather than a scolding:
+        the message it just sent ended nothing, and the way forward is to make the
+        call it was describing.
+        """
+
+        quoted = text.strip()
+        if len(quoted) > 200:
+            quoted = quoted[:200] + "…"
+        return (
+            f"{PROMISE_MARKER} Your last message was: {quoted!r}\n"
+            "That is an announcement, not an answer: you said what you were about "
+            "to do and then stopped, so nothing happened. The user is waiting for "
+            "the work, not for a description of it. Make the tool call you were "
+            "describing now. If you cannot, say plainly what is blocking you "
+            "instead of announcing that you are working."
+        )
 
     def _repeat_notice(self, call: ToolCall) -> str:
         """What the model is told when it has repeated one call too many times.

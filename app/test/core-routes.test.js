@@ -120,3 +120,29 @@ test('the repeat retry is announced, not silent', () => {
   assert.match(chat, /case 'repeat_retry'/, 'the panel must handle the event by name');
   assert.match(chat, /chat\.repeatRetry/, 'the panel must say what is happening');
 });
+
+test('a promise without action is announced, not silent', () => {
+  // The message the agent sent is already in the transcript and looks like
+  // progress. The notice is what tells the reader that nothing happened yet.
+  const service = fs.readFileSync(path.join(AGENT, 'service.js'), 'utf8');
+  const chat = fs.readFileSync(
+    path.join(APP, 'src', 'renderer', 'js', 'chat.js'),
+    'utf8'
+  );
+  assert.match(service, /'promise_nudge'/, 'the main process must forward the event');
+  assert.match(chat, /case 'promise_nudge'/, 'the panel must handle the event by name');
+  assert.match(chat, /chat\.promiseNudge/, 'the panel must say what is happening');
+});
+
+test('the command a call ran is shown whole, not only as a clipped summary', () => {
+  // The row's one-line summary clips at 120 characters. A command is the one
+  // argument where the end matters as much as the beginning, so the opened row
+  // has to show it in full - otherwise the reader cannot check or copy it.
+  const chat = fs.readFileSync(
+    path.join(APP, 'src', 'renderer', 'js', 'chat.js'),
+    'utf8'
+  );
+  assert.match(chat, /commandOf\(/, 'the panel must ask for the whole command');
+  assert.match(chat, /toolrow__pre--command/, 'the command needs its own block');
+  assert.match(chat, /tool\.command/, 'the block must be labelled');
+});

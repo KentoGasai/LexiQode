@@ -36,7 +36,11 @@ const EVENT_TYPES = [
   // The core noticed the agent repeating itself, told it so, and is giving it one
   // more chance. The panel says so, because a turn that is quietly retrying looks
   // exactly like a turn that is stuck.
-  'repeat_retry'
+  'repeat_retry',
+  // The core noticed the agent announcing work instead of doing it, told it so,
+  // and is giving it one more chance. Without this the user sees a message that
+  // looks like progress and a turn that produced nothing.
+  'promise_nudge'
 ];
 
 /**

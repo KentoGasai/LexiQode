@@ -40,7 +40,7 @@
 import { clear, debounce, el, icon, toast } from './ui.js';
 import { renderMarkdown } from './markdown.js';
 import { agentStateKey, current as i18nInfo, t } from './i18n.js';
-import { describeArguments, formatTokens } from './tool-arguments.js';
+import { commandOf, describeArguments, formatTokens } from './tool-arguments.js';
 import { menuPoint, openContextMenu } from './context-menu.js';
 import { askText } from './ask.js';
 
@@ -595,6 +595,23 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
   /** The opened part of a row: what was sent, what came back. */
   function renderToolRow(row) {
     clear(row.body);
+    /*
+     * The command, whole, before anything else.
+     *
+     * The row's one-line summary clips at 120 characters, and a command is the
+     * one argument where the end matters as much as the beginning: a truncated
+     * command cannot be checked and cannot be copied. It goes first because it is
+     * what the reader opened the row to see, and it is shown as a command rather
+     * than as JSON, because `{"command": "..."}` is a data structure and this is
+     * something that was run.
+     */
+    const command = commandOf(row.name, row.args);
+    if (command) {
+      row.body.append(
+        el('div', { class: 'toolrow__label', text: t('tool.command') }),
+        el('pre', { class: 'toolrow__pre toolrow__pre--command', text: command })
+      );
+    }
     if (row.args && Object.keys(row.args).length) {
       row.body.append(
         el('div', { class: 'toolrow__label', text: t('tool.arguments') }),
@@ -1245,6 +1262,12 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
         // and "it noticed and is trying again", which is what the user needs to
         // know while the turn is still running.
         addNotice(t('chat.repeatRetry'));
+        break;
+      case 'promise_nudge':
+        // The agent announced work instead of doing it. The message it sent is
+        // already in the transcript and looks like progress, so the notice is
+        // what tells the reader that nothing happened yet.
+        addNotice(t('chat.promiseNudge'));
         break;
       default:
         // A request that arrives under a name this window has not been taught
