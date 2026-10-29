@@ -80,3 +80,43 @@ test('the approval route is sent the field name the core reads', () => {
   assert.match(source, /\bid:\s*requestId/, 'the window must send the approval id as `id`');
   assert.equal(/request_id:\s*requestId/.test(source), false, '`request_id` is not a field the core reads');
 });
+
+test('the answer route is sent the field names the core reads', () => {
+  // The same mistake as the approval route, one route over: the core reads `id`
+  // and `text`, and a question has no timeout, so a 400 here would leave the
+  // turn waiting for ever rather than failing visibly.
+  const source = fs.readFileSync(path.join(AGENT, 'service.js'), 'utf8');
+  const http = fs.readFileSync(HTTP, 'utf8');
+  assert.match(http, /path == "\/api\/answer"/, 'the core serves the answer route');
+  assert.match(http, /body\.get\("text"\)/, 'the core reads the answer from `text`');
+  assert.match(source, /post\('\/api\/answer'/, 'the window must call the answer route');
+  assert.match(source, /\bid:\s*requestId/, 'the window must send the question id as `id`');
+  assert.match(source, /\btext:\s*text/, 'the window must send the answer as `text`');
+});
+
+test('the question event is one the window is told about', () => {
+  // An event the main process does not forward arrives as `other`, and the
+  // panel's switch never reaches the branch that draws the card. For an approval
+  // that meant a timeout; for a question it means a turn that never finishes.
+  const service = fs.readFileSync(path.join(AGENT, 'service.js'), 'utf8');
+  const chat = fs.readFileSync(
+    path.join(APP, 'src', 'renderer', 'js', 'chat.js'),
+    'utf8'
+  );
+  assert.match(service, /'question_request'/, 'the main process must forward the event');
+  assert.match(chat, /case 'question_request'/, 'the panel must handle the event by name');
+  assert.match(chat, /function questionCard/, 'the panel must draw a card for it');
+});
+
+test('the repeat retry is announced, not silent', () => {
+  // A turn that is quietly retrying after being told looks exactly like a turn
+  // that is stuck, which is the confusion this event exists to remove.
+  const service = fs.readFileSync(path.join(AGENT, 'service.js'), 'utf8');
+  const chat = fs.readFileSync(
+    path.join(APP, 'src', 'renderer', 'js', 'chat.js'),
+    'utf8'
+  );
+  assert.match(service, /'repeat_retry'/, 'the main process must forward the event');
+  assert.match(chat, /case 'repeat_retry'/, 'the panel must handle the event by name');
+  assert.match(chat, /chat\.repeatRetry/, 'the panel must say what is happening');
+});

@@ -19,6 +19,11 @@ from ..errors import ConfigError
 #: Tools that only look at the workspace. Every mode allows at least these.
 READ_TOOLS: tuple[str, ...] = ("read_file", "list_dir", "glob", "grep")
 WRITE_TOOLS: tuple[str, ...] = ("write_file", "edit_file")
+#: The tool that asks the user a question. Offered only where the agent is
+#: expected to carry a task through and may need a decision it cannot make
+#: alone: Agent, Plan and Debug. Ask and Review answer from the code they read,
+#: so a question there would be a way of avoiding the answer.
+ASK_TOOL: str = "ask_user"
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,8 +64,12 @@ MODES: tuple[AgentMode, ...] = (
         summary="Read, edit and run tests until the task is done.",
         instructions=(
             "You are in Agent mode: you are expected to carry the task through. "
-            "Inspect, change, then verify by running the project's own checks."
+            "Inspect, change, then verify by running the project's own checks. "
+            "When a decision is genuinely the user's to make - which of two "
+            "approaches, which file is meant, what the expected behaviour is - ask "
+            "with ask_user instead of guessing; the turn waits for the answer."
         ),
+        tools=(*READ_TOOLS, *WRITE_TOOLS, "run_command", ASK_TOOL),
     ),
     AgentMode(
         id="ask",
@@ -82,9 +91,11 @@ MODES: tuple[AgentMode, ...] = (
             "You are in Plan mode. Produce a plan, not an implementation: the files "
             "to touch, the order to touch them in, what could break, and how the "
             "result should be verified. Read enough code that every step names real "
-            "paths and real symbols. Do not write files."
+            "paths and real symbols. Do not write files. When the plan depends on a "
+            "choice only the user can make, ask with ask_user rather than planning "
+            "both branches."
         ),
-        tools=READ_TOOLS,
+        tools=(*READ_TOOLS, ASK_TOOL),
         steps=16,
     ),
     AgentMode(
@@ -95,9 +106,11 @@ MODES: tuple[AgentMode, ...] = (
             "You are in Debug mode. Reproduce the reported behaviour, gather "
             "evidence, and name the root cause with the lines that prove it. You may "
             "run commands to observe, but you cannot edit files: end with the fix you "
-            "recommend, not with a change you made."
+            "recommend, not with a change you made. When reproducing needs something "
+            "only the user knows - the exact input, the environment, the steps they "
+            "took - ask with ask_user instead of assuming it."
         ),
-        tools=(*READ_TOOLS, "run_command"),
+        tools=(*READ_TOOLS, "run_command", ASK_TOOL),
         steps=20,
     ),
     AgentMode(

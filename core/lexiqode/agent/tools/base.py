@@ -47,6 +47,37 @@ ApprovalFn = Callable[[ApprovalRequest], ApprovalDecision]
 
 
 @dataclass(slots=True)
+class QuestionRequest:
+    """A question the agent needs the user to answer before it can carry on.
+
+    Kept apart from :class:`ApprovalRequest` because the two ask for different
+    things. An approval asks permission for an action the agent has already
+    decided on, and "no" is a complete answer. A question asks for information
+    the agent does not have, and the answer *is* the result of the tool call.
+    """
+
+    id: str
+    question: str
+    #: Suggested answers, drawn as buttons. Empty means free text.
+    options: list[str] = field(default_factory=list)
+    #: True when the user may type an answer that is not one of the options.
+    allow_free_text: bool = True
+
+
+@dataclass(slots=True)
+class QuestionAnswer:
+    """What the user answered, or that they never answered."""
+
+    text: str = ""
+    #: True when the turn was cancelled while the question was open. The tool
+    #: reports that to the model rather than inventing an answer.
+    cancelled: bool = False
+
+
+QuestionFn = Callable[[QuestionRequest], QuestionAnswer]
+
+
+@dataclass(slots=True)
 class ToolResult:
     ok: bool
     content: str
@@ -72,6 +103,10 @@ class ToolContext:
     settings: AgentSettings
     emit: Callable[[str, dict[str, Any]], None]
     approve: ApprovalFn
+    #: Asks the user a question and blocks until they answer. ``None`` when the
+    #: caller has no way to reach a user - a headless run, for instance - in
+    #: which case the tool reports that it cannot ask rather than hanging.
+    ask: QuestionFn | None = None
 
     def resolve(self, raw_path: str, *, must_exist: bool = False) -> Path:
         """Resolve a model-supplied path and refuse to leave the workspace.

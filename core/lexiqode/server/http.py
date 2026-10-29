@@ -375,6 +375,11 @@ class _RequestHandler(BaseHTTPRequestHandler):
                     reason=str(body.get("reason") or ""),
                 )
                 self._send(HTTPStatus.OK, {"ok": True, "delivered": delivered})
+            elif path == "/api/answer":
+                delivered = session.resolve_question(
+                    str(body.get("id") or ""), str(body.get("text") or "")
+                )
+                self._send(HTTPStatus.OK, {"ok": True, "delivered": delivered})
             elif path == "/api/models":
                 self._send(HTTPStatus.OK, {"ok": True, "models": self._probe_models(body)})
             elif path == "/api/complete":

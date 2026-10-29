@@ -28,7 +28,15 @@ const EVENT_TYPES = [
   // the window answers. It was missing from this list, so it arrived as `other`
   // and the panel's switch never reached the branch that draws the card - the
   // request timed out and the model was told the user had refused.
-  'approval_request'
+  'approval_request',
+  // The core asks the user a question with this event and blocks the tool until
+  // the answer arrives. There is no timeout on this one, so a window that never
+  // drew the card would leave the turn waiting for ever.
+  'question_request',
+  // The core noticed the agent repeating itself, told it so, and is giving it one
+  // more chance. The panel says so, because a turn that is quietly retrying looks
+  // exactly like a turn that is stuck.
+  'repeat_retry'
 ];
 
 /**
@@ -230,6 +238,14 @@ class AgentService {
       id: requestId,
       approved: Boolean(approved),
       reason: reason || ''
+    });
+  }
+
+  /** Answer an `ask_user` question. The waiting tool call resumes with this text. */
+  async answer({ requestId, text }) {
+    return this.#require().post('/api/answer', {
+      id: requestId,
+      text: text || ''
     });
   }
 

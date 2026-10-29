@@ -531,6 +531,68 @@ class ApprovalTest(ServerTestCase):
         self.assertFalse((self.workspace / "made.txt").exists())
 
 
+class QuestionTest(ServerTestCase):
+    """The ask_user round trip over the real HTTP surface.
+
+    A question has no timeout, so the turn stays running until the answer
+    arrives. That is the behaviour under test: the state must show the question
+    as pending, and the turn must still be running while it waits.
+    """
+
+    script = [
+        tool_chunks(
+            "ask_user",
+            {"question": "Which file?", "options": ["a.txt", "b.txt"]},
+            call_id="c1",
+        ),
+        text_chunks("Understood, using a.txt."),
+    ]
+    agent = AgentSettings(auto_approve=True, max_steps=4)
+
+    def wait_for_question(self, timeout: float = 8.0) -> list[str]:
+        deadline = time.time() + timeout
+        pending: list[str] = []
+        while time.time() < deadline:
+            pending = self.get("/api/state").json().get("pending_questions") or []
+            if pending:
+                return pending
+            time.sleep(0.05)
+        return pending
+
+    def test_a_question_blocks_the_turn_until_it_is_answered(self) -> None:
+        self.post("/api/chat", {"message": "do the thing"})
+
+        pending = self.wait_for_question()
+        self.assertTrue(pending, "the question should have reached the client")
+        # Still running: the turn is waiting, not finished.
+        self.assertTrue(self.get("/api/state").json()["turn"]["running"])
+
+        response = self.post("/api/answer", {"id": pending[0], "text": "a.txt"})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["delivered"])
+
+        self.wait_for_turn()
+        messages = self.get("/api/history").json()["messages"]
+        tool_messages = [m for m in messages if m.get("role") == "tool"]
+        self.assertIn("a.txt", tool_messages[0]["content"])
+
+    def test_an_answer_for_an_unknown_id_is_not_delivered(self) -> None:
+        response = self.post("/api/answer", {"id": "does-not-exist", "text": "x"})
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["delivered"])
+
+    def test_cancel_frees_a_waiting_question(self) -> None:
+        """Without this the turn would wait for ever: there is no timeout."""
+
+        self.post("/api/chat", {"message": "do the thing"})
+        self.assertTrue(self.wait_for_question(), "the question should be pending")
+
+        self.post("/api/cancel")
+        state = self.wait_for_turn()
+        self.assertFalse(state["turn"]["running"])
+        self.assertEqual(state["pending_questions"], [], "the question must be resolved")
+
+
 class ShutdownTest(ServerTestCase):
     def test_shutdown_stops_the_server(self) -> None:
         response = self.post("/api/shutdown")

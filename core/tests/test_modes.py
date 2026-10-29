@@ -49,7 +49,10 @@ class CatalogueTest(unittest.TestCase):
         for mode_id in ("ask", "plan", "review"):
             mode = get_mode(mode_id)
             self.assertFalse(mode.can_write, f"{mode_id} must not be able to write")
-            self.assertEqual(set(mode.tools or ()), set(READ_TOOLS))
+            # Plan may ask the user a question; Ask and Review answer from the
+            # code they read, so they get the read tools and nothing else.
+            expected = set(READ_TOOLS) | ({"ask_user"} if mode_id == "plan" else set())
+            self.assertEqual(set(mode.tools or ()), expected)
 
     def test_debug_may_run_commands_but_not_edit(self) -> None:
         mode = get_mode("debug")
@@ -58,9 +61,24 @@ class CatalogueTest(unittest.TestCase):
 
     def test_agent_mode_places_no_restriction(self) -> None:
         mode = get_mode("agent")
-        self.assertIsNone(mode.tools)
+        # Agent names its tools explicitly now, so that `ask_user` is offered
+        # there and nowhere it does not belong. The set is the whole builtin
+        # toolset, which is what "no restriction" meant before.
+        self.assertIsNotNone(mode.tools)
         self.assertTrue(mode.can_write)
-        self.assertTrue(mode.allows("anything_at_all"))
+        self.assertTrue(mode.allows("run_command"))
+        self.assertTrue(mode.allows("ask_user"))
+
+    def test_only_three_modes_may_ask_the_user(self) -> None:
+        """A question is for a task being carried through, not for an answer.
+
+        Ask and Review exist to answer from the code; a question there would be a
+        way of avoiding the answer. Agent, Plan and Debug are the modes where a
+        decision only the user can make actually blocks the work.
+        """
+
+        asking = {mode.id for mode in MODES if mode.allows("ask_user")}
+        self.assertEqual(asking, {"agent", "plan", "debug"})
 
     def test_a_mode_may_only_lower_the_step_budget(self) -> None:
         for mode in MODES:

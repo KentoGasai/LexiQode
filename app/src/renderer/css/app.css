@@ -356,7 +356,18 @@ textarea {
 }
 
 .btn--primary:hover {
-  filter: brightness(1.08);
+  /*
+   * The colour is restated, not inherited. `.btn:hover` sets a neutral
+   * background and `.btn--primary` sets white text; both are one class plus one
+   * pseudo-class, so they have equal specificity and the later rule wins. A
+   * hover that only brightened the accent left the text colour to whichever
+   * rule happened to come last, and on the question card the option's label
+   * became unreadable against the surface behind it.
+   */
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+  color: #fff;
+  filter: brightness(1.12);
 }
 
 .btn--ghost {
@@ -1702,6 +1713,80 @@ kbd {
 .approval__row {
   display: flex;
   gap: 6px;
+}
+
+/*
+ * The question card. Same shape as an approval, different colour: an approval is
+ * a warning about something about to happen, a question is the agent waiting for
+ * the user, and the two must not be mistaken for each other at a glance.
+ *
+ * `min-width: 0` is load-bearing, and it is the same rule the rest of this file
+ * follows. A grid item defaults to `min-width: auto`, which means it refuses to
+ * be narrower than its content: one long path or URL in the question pushed the
+ * card wider than the chat panel and the text ran off the edge. The card is a
+ * grid, so the floor has to be removed here and on the text itself.
+ */
+.question {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: rgba(88, 166, 255, 0.08);
+}
+
+.question__what {
+  min-width: 0;
+  font-size: 12.5px;
+  white-space: pre-wrap;
+  /* `anywhere`, not `break-word`: only `anywhere` also lowers the intrinsic
+   * minimum width, which is what stops a long unbroken token from widening the
+   * card. `break-word` wraps the text but still reports the long word as the
+   * minimum, so the card grows anyway. */
+  overflow-wrap: anywhere;
+  max-height: 200px;
+  overflow: auto;
+}
+
+.question__options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* An option is a label the user reads, so it wraps rather than overflowing. */
+.question__options .btn {
+  height: auto;
+  min-height: 26px;
+  padding: 4px 10px;
+  white-space: normal;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.question__row {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.question__input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.question__input:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 
 /*

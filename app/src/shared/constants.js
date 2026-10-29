@@ -109,6 +109,11 @@ const CHANNELS = {
     cancel: 'agent:cancel',
     reset: 'agent:reset',
     approval: 'agent:approval',
+    /**
+     * The answer to an `ask_user` question. Separate from `approval` because the
+     * two carry different payloads: an approval is a yes/no, an answer is text.
+     */
+    answer: 'agent:answer',
     models: 'agent:models',
     saveProfile: 'agent:save-profile',
     complete: 'agent:complete',

@@ -206,6 +206,7 @@ function registerIpc({
   );
   handle(CHANNELS.agent.conversationDelete, (event, id) => agent.deleteConversation(id));
   handle(CHANNELS.agent.approval, (event, payload) => agent.approval(payload));
+  handle(CHANNELS.agent.answer, (event, payload) => agent.answer(payload));
   handle(CHANNELS.agent.models, (event, payload) => agent.models(payload || {}));
   handle(CHANNELS.agent.saveProfile, (event, patch) => agent.saveProfile(patch));
   handle(CHANNELS.agent.complete, (event, payload) => agent.complete(payload));

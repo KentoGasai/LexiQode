@@ -23,7 +23,12 @@ from typing import Any, Callable
 from ..agent.events import EventBus
 from ..agent.loop import AgentLoop, LoopResult
 from ..agent.modes import MODES, AgentMode, catalogue, get_mode
-from ..agent.tools.base import ApprovalDecision, ApprovalRequest
+from ..agent.tools.base import (
+    ApprovalDecision,
+    ApprovalRequest,
+    QuestionAnswer,
+    QuestionRequest,
+)
 from ..agent.tools.registry import ToolRegistry, default_registry
 from ..config import ModelProfile, Settings, sessions_dir
 from ..conversations import ConversationStore, title_from
@@ -85,6 +90,51 @@ class ApprovalBroker:
             return list(self._pending)
 
 
+class QuestionBroker:
+    """Hands questions to the UI and blocks the tool until the user answers.
+
+    Deliberately has no timeout, unlike :class:`ApprovalBroker`. An approval that
+    goes unanswered must fail safe - the write did not happen - so a timeout is
+    the right answer there. A question has no safe default: inventing an answer
+    on the user's behalf is exactly the guessing this tool exists to replace. So
+    the tool waits, for as long as the user takes, and the only things that end
+    the wait are an answer or a cancelled turn.
+    """
+
+    def __init__(self) -> None:
+        self._pending: dict[str, queue.Queue[QuestionAnswer]] = {}
+        self._lock = threading.Lock()
+
+    def request(self, request: QuestionRequest) -> QuestionAnswer:
+        answer: queue.Queue[QuestionAnswer] = queue.Queue(maxsize=1)
+        with self._lock:
+            self._pending[request.id] = answer
+        try:
+            # No timeout argument: this blocks until resolve() is called. A
+            # cancelled turn resolves every pending question, so the wait always
+            # ends - see :meth:`CoreSession.cancel`.
+            return answer.get()
+        finally:
+            with self._lock:
+                self._pending.pop(request.id, None)
+
+    def resolve(self, request_id: str, answer: QuestionAnswer) -> bool:
+        with self._lock:
+            target = self._pending.get(request_id)
+        if target is None:
+            return False
+        try:
+            target.put_nowait(answer)
+        except queue.Full:
+            return False
+        return True
+
+    @property
+    def pending(self) -> list[str]:
+        with self._lock:
+            return list(self._pending)
+
+
 @dataclass(slots=True)
 class TurnState:
     """Progress of the turn currently running, if any."""
@@ -115,6 +165,7 @@ class CoreSession:
         self.bus = bus or EventBus()
         self.registry = registry or default_registry()
         self.approvals = ApprovalBroker()
+        self.questions = QuestionBroker()
         self._approver = approver or self.approvals.request
         self._profile_override = profile_override
         self._client_factory = client_factory
@@ -195,6 +246,7 @@ class CoreSession:
                 registry=self.registry,
                 emit=self.bus.emit,
                 approve=self._approver,
+                ask=self.questions.request,
                 # The open chat's messages, so switching chat is switching what
                 # the model is looking at rather than clearing its memory.
                 history=self.conversation_messages(),
@@ -414,7 +466,17 @@ class CoreSession:
             self.approvals.resolve(
                 request_id, ApprovalDecision(approved=False, reason="the user cancelled the turn")
             )
-        return {"cancelled": self._loop is not None, "pending_approvals": len(pending)}
+        # A question has no timeout, so a cancelled turn is the only thing that
+        # can end its wait. Without this the tool would block for ever and the
+        # turn would never finish.
+        questions = self.questions.pending
+        for request_id in questions:
+            self.questions.resolve(request_id, QuestionAnswer(cancelled=True))
+        return {
+            "cancelled": self._loop is not None,
+            "pending_approvals": len(pending),
+            "pending_questions": len(questions),
+        }
 
     def reset(self) -> None:
         """Start a new chat. The one that was open stays in the list."""
@@ -429,6 +491,11 @@ class CoreSession:
             request_id,
             ApprovalDecision(approved=approved, remember=remember, reason=reason),
         )
+
+    def resolve_question(self, request_id: str, text: str) -> bool:
+        """Deliver the user's answer to a waiting ``ask_user`` call."""
+
+        return self.questions.resolve(request_id, QuestionAnswer(text=text))
 
     def complete(
         self,
@@ -543,6 +610,7 @@ class CoreSession:
                 "last_stopped": turn.result.stopped if turn.result else "",
             },
             "pending_approvals": self.approvals.pending,
+            "pending_questions": self.questions.pending,
             "history_length": len(self.history_messages()),
             # Which chat is open, so a window that reconnects draws the right tab
             # and names it.

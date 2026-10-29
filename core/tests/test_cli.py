@@ -83,7 +83,16 @@ class ToolsCommandTest(CliTestCase):
         names = {entry["name"] for entry in json.loads(buffer.getvalue())}
         self.assertEqual(
             names,
-            {"read_file", "list_dir", "glob", "grep", "write_file", "edit_file", "run_command"},
+            {
+                "read_file",
+                "list_dir",
+                "glob",
+                "grep",
+                "write_file",
+                "edit_file",
+                "run_command",
+                "ask_user",
+            },
         )
 
 

@@ -125,6 +125,11 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
      */
     changedFiles: new Map(),
     approvals: new Map(),
+    /**
+     * Open `ask_user` cards, by request id. Kept apart from `approvals` because
+     * the two are answered differently and a card must not be drawn twice.
+     */
+    questions: new Map(),
     context: null,
     /**
      * The files the next message will carry, in the order they were added.
@@ -735,6 +740,87 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
     }
   }
 
+  /**
+   * The agent is asking a question and the turn is waiting for the answer.
+   *
+   * Unlike an approval there is no timeout on the core side, so this card is the
+   * only thing that can end the wait: if it is never drawn, the turn waits for
+   * ever. That is why the event is handled by name and the id is read from the
+   * field the core actually sends.
+   *
+   * The options are buttons, as in Cursor: one click answers. Free text is
+   * offered as well unless the core said not to, because a question with options
+   * is a question the user may still want to answer in their own words.
+   */
+  function questionCard(payload) {
+    const id = String(payload.id || payload.request_id || '');
+    if (!id || state.questions.has(id)) return;
+    const options = Array.isArray(payload.options) ? payload.options.filter((o) => String(o || '').trim()) : [];
+    const allowFreeText = payload.allow_free_text !== false;
+
+    const node = el('div', { class: 'question' });
+    node.append(
+      el('div', { class: 'turn__who' }, [el('span', { class: 'turn__role', text: t('chat.questionAsked') })]),
+      el('div', { class: 'question__what', text: String(payload.question || '') })
+    );
+
+    const answer = async (text) => {
+      try {
+        await api.agent.answer({ requestId: id, text });
+        node.remove();
+        state.questions.delete(id);
+      } catch (error) {
+        toast('error', error.message);
+      }
+    };
+
+    if (options.length) {
+      const row = el('div', { class: 'question__options' });
+      for (const option of options) {
+        row.append(
+          el('button', {
+            class: 'btn btn--primary',
+            type: 'button',
+            text: String(option),
+            onclick: () => void answer(String(option))
+          })
+        );
+      }
+      node.append(row);
+    }
+
+    if (allowFreeText) {
+      const input = el('input', {
+        class: 'question__input',
+        type: 'text',
+        placeholder: t('chat.answerPlaceholder')
+      });
+      const submit = () => {
+        const text = input.value.trim();
+        if (text) void answer(text);
+      };
+      input.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          submit();
+        }
+      });
+      node.append(
+        el('div', { class: 'question__row' }, [
+          input,
+          el('button', { class: 'btn', type: 'button', text: t('chat.answerSend'), onclick: submit })
+        ])
+      );
+    }
+
+    transcript.append(node);
+    state.questions.set(id, node);
+    scrollIfFollowing(atBottom());
+    // The card is the only way to answer, so the cursor goes where the answer is.
+    const field = node.querySelector('.question__input');
+    if (field) field.focus();
+  }
+
   // --------------------------------------------------------- agent events
 
   function applyStatus(status) {
@@ -906,6 +992,7 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
       state.turnBlocks = [];
       state.tools.clear();
       state.approvals.clear();
+      state.questions.clear();
       state.context = null;
       await loadHistory();
       await loadState();
@@ -1145,6 +1232,19 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
         // waited out its timeout. The event is handled by name now, and the id
         // is read from the field the core actually sends.
         approvalCard(data);
+        break;
+      case 'question_request':
+        // The agent is asking and the turn is blocked on the answer. There is no
+        // timeout on the core side, so a card that is not drawn here is a turn
+        // that never finishes.
+        questionCard(data);
+        break;
+      case 'repeat_retry':
+        // The agent repeated itself, was told so, and is being given one more
+        // chance automatically. Saying so is the difference between "it is stuck"
+        // and "it noticed and is trying again", which is what the user needs to
+        // know while the turn is still running.
+        addNotice(t('chat.repeatRetry'));
         break;
       default:
         // A request that arrives under a name this window has not been taught
@@ -2009,6 +2109,13 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
       if (snapshot.pending_approvals && snapshot.pending_approvals.length) {
         for (const id of snapshot.pending_approvals) approvalCard({ id });
       }
+      // A question that was open when the window reloaded is still open in the
+      // core, and the turn is still waiting on it. The card is rebuilt from the
+      // id alone: the question text is not in the snapshot, so the card says
+      // that the agent is waiting and the answer field still works.
+      if (snapshot.pending_questions && snapshot.pending_questions.length) {
+        for (const id of snapshot.pending_questions) questionCard({ id });
+      }
       renderModes();
       renderContext();
       if (state.settingsOpen) toggleSettings(true);
@@ -2167,6 +2274,7 @@ export function createChat({ api, bus, settings, onNotice, editor, onProfile }) 
     state.turnBlocks = [];
     state.tools.clear();
     state.approvals.clear();
+    state.questions.clear();
     state.modeOpen = false;
     hideModePopup();
     state.tabs = [];

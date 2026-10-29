@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 from .base import Tool, ToolContext, ToolResult
+from .ask import AskUserTool
 from .fs import EditFileTool, GlobTool, GrepTool, ListDirTool, ReadFileTool, WriteFileTool
 from .shell import RunCommandTool
 
@@ -17,6 +18,7 @@ BUILTIN_TOOLS: tuple[type[Tool], ...] = (
     WriteFileTool,
     EditFileTool,
     RunCommandTool,
+    AskUserTool,
 )
 
 

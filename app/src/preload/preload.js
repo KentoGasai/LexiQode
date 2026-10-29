@@ -135,6 +135,7 @@ const api = {
     renameConversation: (id, title) => call(CHANNELS.agent.conversationRename, { id, title }),
     deleteConversation: (id) => call(CHANNELS.agent.conversationDelete, id),
     approval: (payload) => call(CHANNELS.agent.approval, payload),
+    answer: (payload) => call(CHANNELS.agent.answer, payload),
     models: (payload) => call(CHANNELS.agent.models, payload),
     saveProfile: (patch) => call(CHANNELS.agent.saveProfile, patch),
     complete: (payload) => call(CHANNELS.agent.complete, payload)

@@ -27,13 +27,24 @@ from ..llm.types import (
 from .events import EventEmitter
 from .modes import AgentMode, get_mode
 from .prompts import build_system_prompt
-from .tools.base import ApprovalDecision, ApprovalRequest, ToolContext
+from .tools.base import (
+    ApprovalDecision,
+    ApprovalRequest,
+    QuestionAnswer,
+    QuestionRequest,
+    ToolContext,
+)
 from .tools.registry import ToolRegistry
 
 #: Marker on the message that stands in for a dropped part of a conversation.
 #: The panel recognises it and draws a notice instead of a user bubble, and the
 #: model reads it as the context it is.
 SUMMARY_MARKER = "[context summary]"
+
+#: Marker on the message that tells the model it was stopped for repeating
+#: itself. The panel recognises it and draws the stop notice, and the model reads
+#: it as the reason its last call was not the way forward.
+REPEAT_MARKER = "[stopped: repeated call]"
 
 #: Characters per token used by :func:`estimate_tokens`. English prose runs near
 #: four; code and Cyrillic are denser, so the estimate deliberately errs low and
@@ -94,6 +105,7 @@ class AgentLoop:
         registry: ToolRegistry,
         emit: EventEmitter,
         approve: Callable[[ApprovalRequest], ApprovalDecision] | None = None,
+        ask: Callable[[QuestionRequest], QuestionAnswer] | None = None,
         history: list[dict[str, Any]] | None = None,
         client: OpenAIChatClient | None = None,
         extra_rules: str = "",
@@ -105,6 +117,9 @@ class AgentLoop:
         self.registry = registry
         self._emit = emit
         self._approve = approve or _auto_approve
+        #: How the agent reaches the user with a question. ``None`` means there is
+        #: no user to reach, and ``ask_user`` reports that instead of blocking.
+        self._ask = ask
         self._client = client or OpenAIChatClient(profile)
         self._owns_client = client is None
         self._history: list[dict[str, Any]] = list(history or [])
@@ -127,6 +142,12 @@ class AgentLoop:
         #: How many times one identical tool call may be made in a turn before the
         #: loop decides the model is stuck. See :meth:`_note_repeat`.
         self._repeat_limit = 3
+        #: How many episodes of repetition one turn may be helped through before
+        #: the turn is ended. See :meth:`run`. Four, not two: the counter cannot
+        #: tell a recovered episode from an unrecovered one, so it is a budget the
+        #: turn spends rather than a count of failures, and it has to be generous
+        #: enough that a turn which recovers a few times is not cut short.
+        self._repeat_episode_limit = 4
         #: Identical calls seen this turn, keyed by tool name and arguments.
         self._repeats: dict[tuple[str, str], int] = {}
         # Whether the current turn may call tools. Inline edits turn this off so
@@ -176,6 +197,18 @@ class AgentLoop:
         #: Prompt tokens the provider reported for the newest request, which is
         #: how full the model's window actually is. Zero when it reports none.
         measured_prompt_tokens = 0
+        #: How many episodes of repetition this turn has already been helped
+        #: through. The per-episode retry above must not become an unlimited
+        #: supply: a model that repeats, is told, does one other thing and repeats
+        #: again would otherwise be retried for ever, and the turn would never end.
+        #:
+        #: It counts *attempts*, not failures, and that is deliberate. Telling a
+        #: recovered episode from an unrecovered one would mean judging whether the
+        #: model's next call is real progress, and one `list_dir` between two
+        #: episodes is not evidence of anything. Counting attempts is the honest
+        #: bound: it is a budget the turn spends, and it is set high enough that a
+        #: turn which genuinely recovers a few times is not cut short.
+        repeat_episodes = 0
         try:
             for step in range(1, budget + 1):
                 if self._cancel.is_set():
@@ -219,6 +252,23 @@ class AgentLoop:
                         tool_message(call.id or f"call_{call.index}", call.name, outcome)
                     )
                     if self._note_repeat(call):
+                        # The model is stuck. Telling it so in the history is the
+                        # whole point: the stop notice is drawn in the window, and
+                        # a model that never sees it has no reason to change what
+                        # it is doing - which is why the same turn was reported
+                        # stuck again and again.
+                        self._history.append(
+                            user_message(self._repeat_notice(call))
+                        )
+                        if repeat_episodes < self._repeat_episode_limit:
+                            repeat_episodes += 1
+                            self._emit("repeat_retry", {"tool": call.name})
+                            # The counter is cleared so the retry is judged on its
+                            # own: the model has been told, and one more identical
+                            # call after that is a genuine second failure rather
+                            # than the same one counted twice.
+                            self._repeats.clear()
+                            break
                         result.stopped = "repeated"
                         result.text = self._last_assistant_text()
                         break
@@ -309,6 +359,7 @@ class AgentLoop:
             settings=self.settings,
             emit=self._emit,
             approve=self._approve,
+            ask=self._ask,
         )
         result = self.registry.execute(call.name, arguments, context, self._mode.tools)
 
@@ -343,6 +394,26 @@ class AgentLoop:
                 return str(message["content"])
         return ""
 
+    def _repeat_notice(self, call: ToolCall) -> str:
+        """What the model is told when it has repeated one call too many times.
+
+        Written as a user message because that is the role the model treats as
+        instruction, and phrased as a fact about the turn rather than a scolding:
+        the call it just made is the one that was repeated, and the way forward is
+        to change the approach rather than to make the same call again.
+        """
+
+        arguments = json.dumps(call.parsed_arguments(), ensure_ascii=False, sort_keys=True)
+        if len(arguments) > 400:
+            arguments = arguments[:400] + "…"
+        return (
+            f"{REPEAT_MARKER} You have called {call.name} with the same arguments "
+            f"{self._repeat_limit} times in this turn: {arguments}\n"
+            "The result was the same every time, so calling it again will not help. "
+            "Change the approach: use different arguments, use another tool, or stop "
+            "and say what is blocking you. Do not repeat this call."
+        )
+
     def _note_repeat(self, call: ToolCall) -> bool:
         """Notice a call the model has already made, unchanged, too many times.
 
@@ -351,13 +422,22 @@ class AgentLoop:
         turn that ran out of room. A model that repeats one identical call is not
         making progress, and the honest thing is to stop and say so.
 
-        Only *identical* calls count: the same tool with the same arguments. A
-        model that reads a file, edits it and reads it again is working, and the
-        arguments differ, so it is not touched. The counter is per turn and is
-        cleared by :meth:`run`.
+        Only *consecutive* identical calls count. A turn that runs the tests,
+        edits a file and runs the tests again is working, and that is the normal
+        rhythm of a fix - counting those as repeats stopped turns that were
+        making progress, which is worse than not detecting the loop at all. So
+        any call that is not the repeated one clears the count: the model did
+        something else, and the next identical call starts a fresh chain.
+
+        The counter is per turn and is cleared by :meth:`run`.
         """
 
         key = (call.name, json.dumps(call.parsed_arguments(), sort_keys=True, ensure_ascii=False))
+        # Anything other than this exact call means the model moved on, so the
+        # chain of identical calls is broken and starts again from here.
+        for other in list(self._repeats):
+            if other != key:
+                del self._repeats[other]
         self._repeats[key] = self._repeats.get(key, 0) + 1
         if self._repeats[key] < self._repeat_limit:
             return False
