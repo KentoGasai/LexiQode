@@ -119,6 +119,18 @@ TRUNCATED_MARKER = "[stopped: output limit]"
 #: before the loop decides nothing is changing. See :meth:`_note_repeat`.
 NO_PROGRESS_LIMIT = 3
 
+#: How many of the newest tool results are sent whole. The rest are cut down to
+#: :data:`TRIM_HEAD_CHARS` and a note, because every request re-sends the entire
+#: conversation and an old result is dead weight once the model has acted on it.
+TRIM_KEEP_WHOLE = 6
+
+#: Results shorter than this are never cut: the note would cost more than the text.
+TRIM_AFTER_CHARS = 2_000
+
+#: How much of an older result is kept. Enough to see what the file or command was,
+#: which is what a model needs to decide whether to ask for it again.
+TRIM_HEAD_CHARS = 700
+
 #: How many times one turn may be nudged for answering with nothing. Two,
 #: because an empty completion can be a provider hiccup; a third is a model that
 #: is not going to answer, and asking again only spends the budget.
@@ -526,7 +538,10 @@ class AgentLoop:
         """One completion, published as events while it streams."""
 
         accumulator = StreamAccumulator()
-        payload = [{"role": "system", "content": self._system_for(self._mode)}, *self._history]
+        payload = [
+            {"role": "system", "content": self._system_for(self._mode)},
+            *self._wire_history(),
+        ]
         tool_schemas = self.registry.schemas(self._mode.tools) if self._tools_enabled else None
 
         try:
@@ -574,10 +589,21 @@ class AgentLoop:
         )
         result = self.registry.execute(call.name, arguments, context, self._mode.tools)
 
-        content = result.content
+        full = result.content
         budget = self.settings.max_tool_output
-        if len(content) > budget:
-            content = content[:budget] + f"\n...truncated ({len(result.content)} chars)"
+        if len(full) <= budget:
+            content = full
+        else:
+            # A cut result has to say so in a way the model can act on. Naming the
+            # part that survived and the way to narrow the ask matters, because
+            # "truncated" on its own invites the model to read the same thing again
+            # and get the same cut - a loop made of pure waste.
+            content = (
+                f"{full[:budget]}\n"
+                f"...truncated: the first {budget} of {len(full)} characters were "
+                "kept. Do not read this again unchanged; ask for a narrower range "
+                "(start_line/end_line), a tighter pattern, or a specific path."
+            )
 
         preview = content if len(content) <= 4000 else content[:4000] + "..."
         self._emit(
@@ -604,6 +630,52 @@ class AgentLoop:
             if message.get("role") == "assistant" and message.get("content"):
                 return str(message["content"])
         return ""
+
+    def _wire_history(self) -> list[dict[str, Any]]:
+        """The history as it is sent: old tool results shrink, the record does not.
+
+        Every request carries the whole conversation, so an old tool result is paid
+        for on every later step of every later turn. Our stored conversations show
+        what that costs: 27 million re-sent tokens in one chat, 245 million across
+        thirty-five, with `run_command` alone contributing 172 000 characters.
+
+        The newest results are kept whole, because that is the work in progress. Past
+        a short window they are reduced to their first lines and a note saying how
+        much was dropped and how to get it back - the model can always re-read the
+        file or search again, and asking for a narrower range is cheaper than
+        carrying the whole of it for the rest of the session.
+
+        Only the copy on the wire is reduced. `_history` keeps the full text, so the
+        saved conversation and the panel still show what the tool really returned.
+        """
+
+        keep_whole = TRIM_KEEP_WHOLE
+        tool_positions = [
+            index for index, message in enumerate(self._history) if message.get("role") == "tool"
+        ]
+        recent = set(tool_positions[-keep_whole:]) if keep_whole else set()
+
+        wire: list[dict[str, Any]] = []
+        for index, message in enumerate(self._history):
+            if index in recent or message.get("role") != "tool":
+                wire.append(message)
+                continue
+            content = message.get("content")
+            if not isinstance(content, str) or len(content) <= TRIM_AFTER_CHARS:
+                wire.append(message)
+                continue
+            head = content[:TRIM_HEAD_CHARS]
+            dropped = len(content) - len(head)
+            trimmed = dict(message)
+            trimmed["content"] = (
+                f"{head}\n"
+                f"...{dropped} more characters not shown: this result is older than "
+                f"the last {keep_whole} tool results and they are what the turn is "
+                "working on. Ask again if you need it - a narrower range, a tighter "
+                "pattern or a specific path costs less than the whole of it."
+            )
+            wire.append(trimmed)
+        return wire
 
     def _promise_notice(self, text: str) -> str:
         """What the model is told when it announced work instead of doing it.
@@ -763,7 +835,11 @@ class AgentLoop:
     def _prompt_estimate(self, history: list[dict[str, Any]] | None = None) -> int:
         """What the next request would cost, the system prompt included."""
 
-        messages = self._history if history is None else history
+        # The gauge has to measure what is actually sent, not the full record: the
+        # two differ by design once old results shrink, and a gauge that reported
+        # the larger number would compact a conversation that is comfortably inside
+        # the window.
+        messages = self._wire_history() if history is None else history
         return estimate_tokens(
             [{"role": "system", "content": self._system_for(self._mode)}, *messages]
         )

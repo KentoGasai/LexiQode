@@ -92,6 +92,7 @@ class ToolsCommandTest(CliTestCase):
                 "edit_file",
                 "run_command",
                 "ask_user",
+                  "todo_write",
             },
         )
 

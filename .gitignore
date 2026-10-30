@@ -40,3 +40,8 @@ app/vendor/
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# Local research notes. They quote another product's shipped files and this
+# machine's own state, so they stay out of the repository. The pattern is broad on
+# purpose: the folder holds working notes, not documentation.
+notes/

@@ -49,10 +49,22 @@ SETTINGS_FILE_NAME = "settings.json"
 #: working session was cut down at the end of nearly every turn. A settings file
 #: that still carries the old default is moved to the new one; a value somebody
 #: chose on purpose is left alone.
-SETTINGS_VERSION = 2
+#:
+#: Version 3 lowered what a conversation costs. Every request re-sends the whole
+#: history, and two defaults let that history grow far past what it needs to be:
+#: a 24 000-character cap on one tool result and compaction only at three quarters
+#: of the window. Our own stored conversations cost 27 million re-sent tokens in
+#: one chat, and 245 million across 35 of them, against Cursor's working set of
+#: 15 000-20 000 tokens. The cap is now 12 000 characters and compaction happens
+#: at a third of the window.
+SETTINGS_VERSION = 3
 
 #: The message ceiling of version 1, kept only so the migration can recognise it.
 _LEGACY_HISTORY_MESSAGES = 60
+
+#: The old cost defaults, kept only so the migration can recognise them.
+_LEGACY_TOOL_OUTPUT = 24_000
+_LEGACY_COMPACT_AT = 0.75
 
 
 def _roaming_root() -> Path:
@@ -188,13 +200,30 @@ class AgentSettings:
     #: Lines of file content a single read may return.
     max_read_lines: int = 400
     #: Characters a single tool result may contribute to the conversation.
-    max_tool_output: int = 24_000
+    #:
+    #: Every request carries the whole history, so one oversized result is paid for
+    #: again on every later step of the turn and of the session. Measured on our own
+    #: stored conversations, `run_command` averaged 1241 characters per call and
+    #: `read_file` 2495, with the worst single result at the old 24 000 ceiling -
+    #: and one conversation re-sent 27 million tokens over 319 requests. 24 000
+    #: characters is about 6 000 tokens for one result; 12 000 keeps a useful page
+    #: of a file while halving what every later request pays for it.
+    max_tool_output: int = 12_000
     #: Fraction of the model's context window at which the conversation is
     #: compacted instead of being sent whole. The window itself belongs to the
     #: profile (``ModelProfile.context_window``), because it is a property of the
     #: model and not of how the agent behaves; what belongs here is when to act
     #: on it.
-    compact_at: float = 0.75
+    #:
+    #: Cursor's own records put a working conversation around 15 000-20 000 tokens
+    #: against a 200 000-token window (its `contextWindowStatusAtCreation` and
+    #: `promptDryRunInfo` fields), which is under a tenth of the window. At 0.75 a
+    #: conversation was allowed to grow to three quarters of the window before
+    #: anything was dropped, and the whole of it was re-sent on every step until
+    #: then: 413 000 tokens of history on the largest of our stored conversations.
+    #: Acting at a third of the window keeps the working set near Cursor's while
+    #: leaving more than a hundred thousand tokens of room for a long turn.
+    compact_at: float = 0.35
     #: Hard ceiling on stored messages, whatever the window would allow. A
     #: backstop for an endpoint whose tokens are far more expensive than the
     #: four-characters-per-token estimate assumes.
@@ -220,6 +249,11 @@ def _migrate(agent: AgentSettings, version: int) -> None:
 
     if version < 2 and agent.max_history_messages == _LEGACY_HISTORY_MESSAGES:
         agent.max_history_messages = AgentSettings().max_history_messages
+    if version < 3:
+        if agent.max_tool_output == _LEGACY_TOOL_OUTPUT:
+            agent.max_tool_output = AgentSettings().max_tool_output
+        if agent.compact_at == _LEGACY_COMPACT_AT:
+            agent.compact_at = AgentSettings().compact_at
 
 
 @dataclass(slots=True)

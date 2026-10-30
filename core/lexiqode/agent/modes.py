@@ -24,6 +24,10 @@ WRITE_TOOLS: tuple[str, ...] = ("write_file", "edit_file")
 #: alone: Agent, Plan and Debug. Ask and Review answer from the code they read,
 #: so a question there would be a way of avoiding the answer.
 ASK_TOOL: str = "ask_user"
+#: The tool that keeps the list of tasks. Offered where work is carried out or
+#: planned - Agent, Plan and Debug. Ask and Review change nothing, so a list of
+#: steps there would describe work nobody is going to do.
+TODO_TOOL: str = "todo_write"
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,9 +71,14 @@ MODES: tuple[AgentMode, ...] = (
             "Inspect, change, then verify by running the project's own checks. "
             "When a decision is genuinely the user's to make - which of two "
             "approaches, which file is meant, what the expected behaviour is - ask "
-            "with ask_user instead of guessing; the turn waits for the answer."
+            "with ask_user instead of guessing; the turn waits for the answer. "
+            "For work with more than two steps, keep the list with todo_write: send "
+            "the whole list, mark exactly one task in_progress, and mark a task "
+            "completed the moment it is done rather than in a batch at the end. If "
+            "the conversation already has a list, carry on from it instead of "
+            "starting a new one."
         ),
-        tools=(*READ_TOOLS, *WRITE_TOOLS, "run_command", ASK_TOOL),
+        tools=(*READ_TOOLS, *WRITE_TOOLS, "run_command", ASK_TOOL, TODO_TOOL),
     ),
     AgentMode(
         id="ask",
@@ -81,7 +90,6 @@ MODES: tuple[AgentMode, ...] = (
             "had applied it. Quote the lines that support your answer."
         ),
         tools=READ_TOOLS,
-        steps=12,
     ),
     AgentMode(
         id="plan",
@@ -93,10 +101,13 @@ MODES: tuple[AgentMode, ...] = (
             "result should be verified. Read enough code that every step names real "
             "paths and real symbols. Do not write files. When the plan depends on a "
             "choice only the user can make, ask with ask_user rather than planning "
-            "both branches."
+            "both branches. "
+            "Write the plan with todo_write, one task per step, every task pending: "
+            "the list is what Agent mode will carry out, so a step that is not in it "
+            "is a step that will not be done. Then give the same plan in prose, "
+            "naming the files and symbols each step touches."
         ),
-        tools=(*READ_TOOLS, ASK_TOOL),
-        steps=16,
+        tools=(*READ_TOOLS, ASK_TOOL, TODO_TOOL),
     ),
     AgentMode(
         id="debug",
@@ -111,7 +122,6 @@ MODES: tuple[AgentMode, ...] = (
             "took - ask with ask_user instead of assuming it."
         ),
         tools=(*READ_TOOLS, "run_command", ASK_TOOL),
-        steps=20,
     ),
     AgentMode(
         id="review",
@@ -124,7 +134,6 @@ MODES: tuple[AgentMode, ...] = (
             "line. Do not edit anything."
         ),
         tools=READ_TOOLS,
-        steps=16,
     ),
 )
 

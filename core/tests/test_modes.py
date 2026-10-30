@@ -49,9 +49,11 @@ class CatalogueTest(unittest.TestCase):
         for mode_id in ("ask", "plan", "review"):
             mode = get_mode(mode_id)
             self.assertFalse(mode.can_write, f"{mode_id} must not be able to write")
-            # Plan may ask the user a question; Ask and Review answer from the
-            # code they read, so they get the read tools and nothing else.
-            expected = set(READ_TOOLS) | ({"ask_user"} if mode_id == "plan" else set())
+            # Plan may ask the user a question and keep a list of the steps it is
+            # planning; Ask and Review answer from the code they read, so they get
+            # the read tools and nothing else.
+            extra = {"ask_user", "todo_write"} if mode_id == "plan" else set()
+            expected = set(READ_TOOLS) | extra
             self.assertEqual(set(mode.tools or ()), expected)
 
     def test_debug_may_run_commands_but_not_edit(self) -> None:

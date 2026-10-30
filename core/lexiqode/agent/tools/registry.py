@@ -8,6 +8,7 @@ from .base import Tool, ToolContext, ToolResult
 from .ask import AskUserTool
 from .fs import EditFileTool, GlobTool, GrepTool, ListDirTool, ReadFileTool, WriteFileTool
 from .shell import RunCommandTool
+from .todo import TodoWriteTool
 
 #: The default toolset. Ordering matters only for prompt stability.
 BUILTIN_TOOLS: tuple[type[Tool], ...] = (
@@ -19,6 +20,7 @@ BUILTIN_TOOLS: tuple[type[Tool], ...] = (
     EditFileTool,
     RunCommandTool,
     AskUserTool,
+    TodoWriteTool,
 )
 
 
